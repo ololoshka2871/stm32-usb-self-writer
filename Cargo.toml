@@ -33,7 +33,8 @@ defmt = "0.2"
 defmt-rtt = "0.2"
 panic-probe = { version = "0.2", features = ["print-defmt"] }
 
-heatshrink-rust = { path = "lib/heatshrink-rust" }
+heatshrink-rust = { path = "lib/heatshrink.rs/heatshrink-rust" }
+heatshrink-rust-macro = { path = "lib/heatshrink.rs/heatshrink-rust-macro" }
 emfat-rust = { path = "lib/emfat" }
 nanopb-rs = { path = "lib/nanopb.rs/nanopb-rs" }
 flash-settings-rs = { path = "lib/flash-settings.rs" }
