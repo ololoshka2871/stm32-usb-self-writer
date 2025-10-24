@@ -46,8 +46,7 @@ impl DataPage for DataBlock {
     fn push_data(&mut self, result: Option<u32>, channel: FChannel) -> bool {
         defmt::trace!("DataPage::push_data(result={}, ch={})", result, channel);
         let v = if let Some(r) = result {
-            let diff = r as i32
-                - unsafe { core::mem::transmute::<u32, i32>(self.prevs[channel as usize]) };
+            let diff = r as i32 - self.prevs[channel as usize].cast_signed();
             self.prevs[channel as usize] = r;
             diff
         } else {

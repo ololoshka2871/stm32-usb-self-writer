@@ -5,12 +5,9 @@ where
     D: DurationTicks,
     F: Fn(Timer) + Send + 'static,
 {
-    unsafe {
-        Timer::new(duration)
-            .set_name(name)
-            .set_auto_reload(false)
-            .create(f)
-            .map_err(|_| panic!("Out of memory"))
-            .unwrap_unchecked()
-    }
+    Timer::new(duration)
+        .set_name(name)
+        .set_auto_reload(false)
+        .create(f)
+        .expect("Out of memory")
 }
