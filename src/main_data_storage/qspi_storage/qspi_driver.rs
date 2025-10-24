@@ -3,7 +3,8 @@ use core::any::Any;
 use alloc::{boxed::Box, sync::Arc};
 use freertos_rust::{Duration, Mutex, Timer};
 use qspi_stm32lx3::qspi::QspiWriteCommand;
-#[cfg(any(feature = "stm32l433", feature = "stm32l443"))]
+
+#[cfg(feature = "stm32l433")]
 pub use qspi_stm32lx3::{qspi, stm32l4x3::QUADSPI};
 
 pub use qspi::{
@@ -51,7 +52,7 @@ pub enum Opcode {
     /// Write address extander register
     WriteAddrExtanderReg = 0xC5,
 }
-
+#[allow(dead_code)]
 pub trait FlashDriver: Sync + Send {
     fn get_jedec_id(&mut self) -> Result<super::Identification, QspiError>;
     fn get_jedec_id_qio(&mut self) -> Result<super::Identification, QspiError>;
@@ -152,7 +153,7 @@ where
 
         if let Some(config) = config {
             defmt::info!("Found flash: {}", config);
-            core::mem::forget(core::mem::replace(&mut res.config, config));
+            let _ = core::mem::replace(&mut res.config, config);
 
             if let Err(e) = res.wake_up() {
                 core::mem::forget(res);
