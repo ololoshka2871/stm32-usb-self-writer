@@ -9,8 +9,7 @@ version = "0.1.0"
 embedded-hal = "0.2.4"
 cortex-m = "0.7.3"
 cortex-m-rt = "0.6.11" # need by stm32l4 == 0.13.0
-#freertos-rust = "0.1.2"
-freertos-rust = { git = "https://github.com/lobaro/FreeRTOS-rust.git" }
+freertos-rust = { git = "https://github.com/lobaro/FreeRTOS-rust.git", rev = "e365ca8a116cc1bd7f1667198f0cb1faaaa6d887" }
 
 stm32l4xx-hal = { version= "0.6.0", features = ["stm32l4x2", "rt"] }
 

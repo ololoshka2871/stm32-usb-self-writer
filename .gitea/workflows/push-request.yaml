@@ -39,7 +39,7 @@ jobs:
           echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
           cat .cargo/config.toml
 
-      - name: Build different features
+      - name: Build
         env:
           http_proxy: ""
           https_proxy: ""
