@@ -83,8 +83,8 @@ impl WorkMode<PowerSaveMode> for PowerSaveMode {
 
                     let mut it_src = src.iter().map(|a| *a);
 
-                    let mut enc = HeatshrinkEncoder::from_source(&mut it_src);
-                    let dec = HeatshrinkDecoder::from_source(&mut enc);
+                    let mut enc = HeatshrinkEncoder::source(&mut it_src);
+                    let dec = HeatshrinkDecoder::source(&mut enc);
 
                     for (i, b) in dec.enumerate() {
                         defmt::debug!("decoded[{}] = {:X}", i, b);

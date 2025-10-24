@@ -1,9 +1,3 @@
 [submodule "FreeRTOS-Kernel"]
 	path = FreeRTOS-Kernel
 	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
-[submodule "heatshrink-rust/heatshrink"]
-	path = lib/heatshrink-rust/heatshrink
-	url = https://github.com/UnePierre/heatshrink.git
-[submodule "lib/stm32-usb.rs"]
-	path = lib/stm32-usb.rs
-	url = https://github.com/ololoshka2871/stm32-usb.rs.git
