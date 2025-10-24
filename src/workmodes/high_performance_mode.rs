@@ -132,39 +132,39 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         let mut gpiod = dp.GPIOD.split(&mut rcc.ahb2);
 
         #[cfg(not(feature = "no-flash"))]
-        let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
-        #[cfg(not(feature = "no-flash"))]
-        let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
+        let (qspi, flash_reset_pin) = {
+            let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
+            let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
 
-        #[cfg(not(feature = "no-flash"))]
-        let (qspi, flash_reset_pin) = super::common::create_qspi(
-            (
-                gpioa
-                    .pa3
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-                gpioa
-                    .pa2
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-                gpioe
-                    .pe12
-                    .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
-                gpiob
-                    .pb0
-                    .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
-                gpioa
-                    .pa7
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-                gpioa
-                    .pa6
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-            ),
-            gpiod.pd11.into_push_pull_output_in_state(
-                &mut gpiod.moder,
-                &mut gpiod.otyper,
-                PinState::Low,
-            ),
-            &mut rcc.ahb3,
-        );
+            super::common::create_qspi(
+                (
+                    gpioa
+                        .pa3
+                        .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+                    gpioa
+                        .pa2
+                        .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+                    gpioe
+                        .pe12
+                        .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
+                    gpiob
+                        .pb0
+                        .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
+                    gpioa
+                        .pa7
+                        .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+                    gpioa
+                        .pa6
+                        .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+                ),
+                gpiod.pd11.into_push_pull_output_in_state(
+                    &mut gpiod.moder,
+                    &mut gpiod.otyper,
+                    PinState::Low,
+                ),
+                &mut rcc.ahb3,
+            )
+        };
 
         HighPerformanceMode {
             flash: Arc::new(Mutex::new(dp.FLASH.constrain()).unwrap()),

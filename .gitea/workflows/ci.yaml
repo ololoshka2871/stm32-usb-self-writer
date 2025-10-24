@@ -1,0 +1,55 @@
+name: Build
+
+on: 
+  push:
+    tags:
+      - v*
+
+# Caching proxy
+env:
+  http_proxy: ${{ vars.HTTP_PROXY }} 
+  https_proxy: ${{ vars.HTTP_PROXY }} 
+  NODE_TLS_REJECT_UNAUTHORIZED: 0
+
+jobs:
+  build:
+    runs-on: rust-stm32
+    steps:
+      - name: Install root certificate
+        run: |
+          mkdir -p /usr/share/ca-certificates/extra
+          echo "${{ vars.SCTB_ROOT_CERT }}" > /usr/share/ca-certificates/extra/sctb.crt
+          echo "extra/sctb.crt" >> /etc/ca-certificates.conf
+          update-ca-certificates
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Clone
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: install crates.io mirror
+        run: |
+          mkdir -p .cargo/
+          echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
+          cat .cargo/config.toml
+
+      - name: Build
+        env:
+          http_proxy: ""
+          https_proxy: ""
+        run: cargo build --release
+
+      - name: Create binary dist
+        run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/stm32-usb-self-writer stm32-usb-self-writer.bin
+
+      - uses: akkuman/gitea-release-action@v1
+        with:
+          name: v${{ steps.read_version.outputs.value }}
+          body: |
+            This is an automatic ${{ steps.read_version.outputs.value }} release!
+          prerelease: true
+          files: |
+            stm32-usb-self-writer.bin
