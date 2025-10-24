@@ -118,9 +118,7 @@ unsafe fn USB() {
     let interrupt_ctx = InterruptContext::new();
     if let Some(usbd) = USBD_THREAD.as_ref() {
         // Результат не особо важен
-        core::mem::forget(
-            usbd.notify_from_isr(&interrupt_ctx, freertos_rust::TaskNotification::NoAction),
-        );
+        usbd.notify_from_isr(&interrupt_ctx, freertos_rust::TaskNotification::NoAction).ok();
     }
 
     // Как только прерывание случилось, мы посылаем сигнал потоку

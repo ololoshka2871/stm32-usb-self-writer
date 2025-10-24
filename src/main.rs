@@ -1,7 +1,5 @@
 #![no_std]
 #![no_main]
-// For allocator
-#![feature(lang_items)]
 #![feature(alloc_error_handler)]
 
 extern crate alloc;
