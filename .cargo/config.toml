@@ -8,7 +8,7 @@
 # runner = "arm-none-eabi-gdb -q -x openocd.gdb"
 # runner = "gdb-multiarch -q -x openocd.gdb"
 # runner = "gdb -q -x openocd.gdb"
-# runner = "probe-run --chip STM32L442KCTx"
+runner = "probe-rs run --no-location --chip STM32L433VC"
 
 rustflags = [
   # This is needed if your flash or ram addresses are not aligned to 0x10000 in memory.x
@@ -50,3 +50,6 @@ rrb = "run --release --bin stm32-usb-self-writer"
 # info bloat
 b = "bloat -n 5"
 br = "bloat -n 5 --release"
+
+[env]
+DEFMT_LOG = "debug"
