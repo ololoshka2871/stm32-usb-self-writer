@@ -1,5 +1,6 @@
+#![allow(dead_code)]
+
 use stm32l4xx_hal::stm32::{rcc, RCC};
-//use stm32l4xx_hal::rcc;
 
 use crate::hal::Sealed;
 
