@@ -6,6 +6,15 @@ use quote::ToTokens;
 use syn::Lit;
 use syn::{parse::Parse, Expr, ExprBinary, Token};
 
+fn parse_binary_expr(input: &syn::parse::ParseStream) -> syn::Result<ExprBinary> {
+    let expr: Expr = input.parse()?;
+    if let Expr::Binary(binary) = expr {
+        Ok(binary)
+    } else {
+        Err(syn::Error::new_spanned(expr, "Expected binary expression"))
+    }
+}
+
 #[proc_macro]
 pub fn store_coeff_nanopb(cfg: TokenStream) -> TokenStream {
     #[derive(Debug)]
@@ -20,7 +29,7 @@ pub fn store_coeff_nanopb(cfg: TokenStream) -> TokenStream {
     impl Parse for Config {
         fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
             Ok(Config {
-                ex: input.parse()?,
+                ex: parse_binary_expr(&input)?,
                 _separator1: input.parse()?,
                 src_field: input.parse()?,
                 _separator2: input.parse()?,
@@ -62,7 +71,7 @@ pub fn store_coeff(cfg: TokenStream) -> TokenStream {
     impl Parse for Config {
         fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
             Ok(Config {
-                ex: input.parse()?,
+                ex: parse_binary_expr(&input)?,
                 _separator1: input.parse()?,
                 src_field: input.parse()?,
                 _separator2: input.parse()?,

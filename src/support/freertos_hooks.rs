@@ -12,14 +12,12 @@ unsafe fn DefaultHandler(irqn: i16) {
     // custom default handler
     // irqn is negative for Cortex-M exceptions
     // irqn is positive for device specific (line IRQ)
-    defmt::error!("Unregistred irq: {}", irqn);
-    panic!();
+    defmt::panic!("Unregistred irq: {}", irqn);
 }
 
 #[exception]
 unsafe fn HardFault(_ef: &ExceptionFrame) -> ! {
-    defmt::error!("HardFault");
-    panic!()
+    defmt::panic!("HardFault");
 }
 
 // define what happens in an Out Of Memory (OOM) condition
