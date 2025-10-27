@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:31 - Data length"]
     #[inline(always)]
-    pub fn dl(&mut self) -> DL_W {
+    pub fn dl(&mut self) -> DL_W<'_> {
         DL_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

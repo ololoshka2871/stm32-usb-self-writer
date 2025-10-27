@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:31 - ALTERNATE"]
     #[inline(always)]
-    pub fn alternate(&mut self) -> ALTERNATE_W {
+    pub fn alternate(&mut self) -> ALTERNATE_W<'_> {
         ALTERNATE_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

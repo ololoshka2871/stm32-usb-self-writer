@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:31 - Data"]
     #[inline(always)]
-    pub fn data(&mut self) -> DATA_W {
+    pub fn data(&mut self) -> DATA_W<'_> {
         DATA_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

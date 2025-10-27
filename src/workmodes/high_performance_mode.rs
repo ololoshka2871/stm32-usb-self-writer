@@ -24,8 +24,8 @@ use crate::workmodes::{common::ClockConfigProvider, processing::HighPerformanceP
 use super::{output_storage::OutputStorage, WorkMode};
 
 // /PD *M /AD
-const PLL_CFG: (u32, u32, u32) = (3, 40, 2);
-const APB1_DEVIDER: u32 = 8;
+const PLL_CFG: (u32, u32, u32) = (6, 40, 2); // (3, 40, 2) = 80 Mhz
+const APB1_DEVIDER: u32 = 1; // USB max performance
 const APB2_DEVIDER: u32 = 8;
 
 struct HighPerformanceClockConfigProvider;

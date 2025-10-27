@@ -698,82 +698,82 @@ impl R {
 impl W {
     #[doc = "Bits 24:31 - Clock prescaler"]
     #[inline(always)]
-    pub fn prescaler(&mut self) -> PRESCALER_W {
+    pub fn prescaler(&mut self) -> PRESCALER_W<'_> {
         PRESCALER_W { w: self }
     }
     #[doc = "Bit 23 - Polling match mode"]
     #[inline(always)]
-    pub fn pmm(&mut self) -> PMM_W {
+    pub fn pmm(&mut self) -> PMM_W<'_> {
         PMM_W { w: self }
     }
     #[doc = "Bit 22 - Automatic poll mode stop"]
     #[inline(always)]
-    pub fn apms(&mut self) -> APMS_W {
+    pub fn apms(&mut self) -> APMS_W<'_> {
         APMS_W { w: self }
     }
     #[doc = "Bit 20 - TimeOut interrupt enable"]
     #[inline(always)]
-    pub fn toie(&mut self) -> TOIE_W {
+    pub fn toie(&mut self) -> TOIE_W<'_> {
         TOIE_W { w: self }
     }
     #[doc = "Bit 19 - Status match interrupt enable"]
     #[inline(always)]
-    pub fn smie(&mut self) -> SMIE_W {
+    pub fn smie(&mut self) -> SMIE_W<'_> {
         SMIE_W { w: self }
     }
     #[doc = "Bit 18 - FIFO threshold interrupt enable"]
     #[inline(always)]
-    pub fn ftie(&mut self) -> FTIE_W {
+    pub fn ftie(&mut self) -> FTIE_W<'_> {
         FTIE_W { w: self }
     }
     #[doc = "Bit 17 - Transfer complete interrupt enable"]
     #[inline(always)]
-    pub fn tcie(&mut self) -> TCIE_W {
+    pub fn tcie(&mut self) -> TCIE_W<'_> {
         TCIE_W { w: self }
     }
     #[doc = "Bit 16 - Transfer error interrupt enable"]
     #[inline(always)]
-    pub fn teie(&mut self) -> TEIE_W {
+    pub fn teie(&mut self) -> TEIE_W<'_> {
         TEIE_W { w: self }
     }
     #[doc = "Bits 8:12 - IFO threshold level"]
     #[inline(always)]
-    pub fn fthres(&mut self) -> FTHRES_W {
+    pub fn fthres(&mut self) -> FTHRES_W<'_> {
         FTHRES_W { w: self }
     }
     #[doc = "Bit 7 - FLASH memory selection"]
     #[inline(always)]
-    pub fn fsel(&mut self) -> FSEL_W {
+    pub fn fsel(&mut self) -> FSEL_W<'_> {
         FSEL_W { w: self }
     }
     #[doc = "Bit 6 - Dual-flash mode"]
     #[inline(always)]
-    pub fn dfm(&mut self) -> DFM_W {
+    pub fn dfm(&mut self) -> DFM_W<'_> {
         DFM_W { w: self }
     }
     #[doc = "Bit 4 - Sample shift"]
     #[inline(always)]
-    pub fn sshift(&mut self) -> SSHIFT_W {
+    pub fn sshift(&mut self) -> SSHIFT_W<'_> {
         SSHIFT_W { w: self }
     }
     #[doc = "Bit 3 - Timeout counter enable"]
     #[inline(always)]
-    pub fn tcen(&mut self) -> TCEN_W {
+    pub fn tcen(&mut self) -> TCEN_W<'_> {
         TCEN_W { w: self }
     }
     #[doc = "Bit 2 - DMA enable"]
     #[inline(always)]
-    pub fn dmaen(&mut self) -> DMAEN_W {
+    pub fn dmaen(&mut self) -> DMAEN_W<'_> {
         DMAEN_W { w: self }
     }
     #[doc = "Bit 1 - Abort request"]
     #[inline(always)]
-    pub fn abort(&mut self) -> ABORT_W {
+    pub fn abort(&mut self) -> ABORT_W<'_> {
         ABORT_W { w: self }
     }
     #[doc = "Bit 0 - Enable"]
     #[inline(always)]
-    pub fn en(&mut self) -> EN_W {
+    pub fn en(&mut self) -> EN_W<'_> {
         EN_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

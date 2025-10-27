@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:31 - Address"]
     #[inline(always)]
-    pub fn address(&mut self) -> ADDRESS_W {
+    pub fn address(&mut self) -> ADDRESS_W<'_> {
         ADDRESS_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

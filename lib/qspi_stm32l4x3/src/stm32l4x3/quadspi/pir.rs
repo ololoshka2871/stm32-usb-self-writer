@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:15 - Polling interval"]
     #[inline(always)]
-    pub fn interval(&mut self) -> INTERVAL_W {
+    pub fn interval(&mut self) -> INTERVAL_W<'_> {
         INTERVAL_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

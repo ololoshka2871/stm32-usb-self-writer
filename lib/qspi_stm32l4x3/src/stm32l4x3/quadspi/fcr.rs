@@ -214,22 +214,22 @@ impl R {
 impl W {
     #[doc = "Bit 4 - Clear timeout flag"]
     #[inline(always)]
-    pub fn ctof(&mut self) -> CTOF_W {
+    pub fn ctof(&mut self) -> CTOF_W<'_> {
         CTOF_W { w: self }
     }
     #[doc = "Bit 3 - Clear status match flag"]
     #[inline(always)]
-    pub fn csmf(&mut self) -> CSMF_W {
+    pub fn csmf(&mut self) -> CSMF_W<'_> {
         CSMF_W { w: self }
     }
     #[doc = "Bit 1 - Clear transfer complete flag"]
     #[inline(always)]
-    pub fn ctcf(&mut self) -> CTCF_W {
+    pub fn ctcf(&mut self) -> CTCF_W<'_> {
         CTCF_W { w: self }
     }
     #[doc = "Bit 0 - Clear transfer error flag"]
     #[inline(always)]
-    pub fn ctef(&mut self) -> CTEF_W {
+    pub fn ctef(&mut self) -> CTEF_W<'_> {
         CTEF_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

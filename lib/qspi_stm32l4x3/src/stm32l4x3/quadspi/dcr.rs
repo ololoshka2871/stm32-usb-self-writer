@@ -152,17 +152,17 @@ impl R {
 impl W {
     #[doc = "Bits 16:20 - FLASH memory size"]
     #[inline(always)]
-    pub fn fsize(&mut self) -> FSIZE_W {
+    pub fn fsize(&mut self) -> FSIZE_W<'_> {
         FSIZE_W { w: self }
     }
     #[doc = "Bits 8:10 - Chip select high time"]
     #[inline(always)]
-    pub fn csht(&mut self) -> CSHT_W {
+    pub fn csht(&mut self) -> CSHT_W<'_> {
         CSHT_W { w: self }
     }
     #[doc = "Bit 0 - Mode 0 / mode 3"]
     #[inline(always)]
-    pub fn ckmode(&mut self) -> CKMODE_W {
+    pub fn ckmode(&mut self) -> CKMODE_W<'_> {
         CKMODE_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]
