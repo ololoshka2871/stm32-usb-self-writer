@@ -4,7 +4,7 @@ use std::{
 };
 
 static PROTOBUF_FILE: &str = "ProtobufDevice_0000E006.proto";
-static PROTOBUF_DIR: &str = "src/protobuf";
+static PROTOBUF_DIR: &str = "src/protobuf/ru.sktbelpa.protobufobjects";
 
 fn gen_protobuf() {
     let mut protofile = PathBuf::from(PROTOBUF_DIR);
