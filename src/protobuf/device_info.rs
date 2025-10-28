@@ -1,16 +1,47 @@
+use alloc::sync::Arc;
+use freertos_rust::{Duration, FreeRtosError, Mutex};
 use my_proc_macro::git_version;
 
-pub fn fill_info(info: &mut super::messages::InfoResponse) -> Result<(), ()> {
-    info.hw_version = 1; // TODO
+use crate::{threads::sensor_processor::FChannel, workmodes::output_storage::OutputStorage};
+
+pub fn fill_info(
+    info: &mut super::messages::InfoResponse,
+    output_storage: &Arc<Mutex<OutputStorage>>,
+) -> Result<(), FreeRtosError> {
+    let mut err = None;
+
+    info.hw_version = crate::config::HW_VERSION;
     info.sw_version = git_version!();
 
-    info.pressure_channel_failed = false; // TODO
-    info.temperature_channel_failed = false; // TODO
+    match output_storage.lock(*super::OUT_STORAGE_LOCK_WAIT) {
+        Ok(guard) => {
+            info.pressure_channel_failed = guard.frequencys[FChannel::Pressure as usize].is_none();
+            info.temperature_channel_failed =
+                guard.frequencys[FChannel::Temperature as usize].is_none();
+        }
+        Err(e) => {
+            info.pressure_channel_failed = false;
+            info.temperature_channel_failed = false;
+            err = Some(e);
+        }
+    }
 
-    info.overpress_detected = false; // TODO
-    info.overheat_detected = false; // TODO
-    info.overheat_cpu_detected = false; // TODO
-    info.over_vbat_detected = false; // TODO
+    let r: Result<(), crate::settings::SettingActionError<()>> =
+        crate::settings::settings_action(Duration::ms(1), |(app_settings, _)| {
+            info.overpress_detected = app_settings.monitoring.Ovarpress;
+            info.overheat_detected = app_settings.monitoring.Ovarheat;
+            info.overheat_cpu_detected = app_settings.monitoring.CPUOvarheat;
+            info.over_vbat_detected = app_settings.monitoring.OverPower;
+            Ok(())
+        });
 
-    Ok(())
+    if r.is_err() {
+        err = Some(FreeRtosError::Timeout);
+    }
+
+    if let Some(e) = err {
+        Err(e)
+    } else {
+        Ok(())
+    }
 }

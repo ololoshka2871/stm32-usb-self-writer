@@ -4,6 +4,7 @@ use stm32l4xx_hal::gpio::PinState;
 
 pub const XTAL_FREQ: u32 = 24_000_000;
 pub const FREERTOS_CONFIG_FREQ: u32 = 3_000_000; // Это же число должно быть в src/configTemplate/FreeRTOSConfig.h
+pub const HW_VERSION: u32 = 1;
 
 //-----------------------------------------------------------------------------
 
