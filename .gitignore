@@ -23,3 +23,7 @@ __pycache__/
 
 #regs
 *_regs.txt
+
+# pdf
+*.pdf
+!maket.pdf
