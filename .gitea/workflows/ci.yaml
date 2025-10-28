@@ -45,6 +45,12 @@ jobs:
       - name: Create binary dist
         run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/stm32-usb-self-writer stm32-usb-self-writer.bin
 
+      - uses: SebRollen/toml-action@v1.2.0
+        id: read_version
+        with:
+          file: 'Cargo.toml'
+          field: 'package.version'
+
       - uses: akkuman/gitea-release-action@v1
         with:
           name: v${{ steps.read_version.outputs.value }}
