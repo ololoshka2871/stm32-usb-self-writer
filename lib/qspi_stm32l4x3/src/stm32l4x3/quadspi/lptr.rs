@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:15 - Timeout period"]
     #[inline(always)]
-    pub fn timeout(&mut self) -> TIMEOUT_W {
+    pub fn timeout(&mut self) -> TIMEOUT_W<'_> {
         TIMEOUT_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

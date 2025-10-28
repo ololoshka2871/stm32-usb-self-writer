@@ -66,7 +66,6 @@ impl EMfatStorage {
                 .user_data(&README_COMPRESSED as *const CompressedData as usize)
                 .build(),
         );
-
         defmt::trace!("EmFat: /driver.inf");
         res.push(
             EntryBuilder::new()
@@ -80,7 +79,7 @@ impl EMfatStorage {
                 .user_data(&DRIVER_INF_COMPRESSED as *const CompressedData as usize)
                 .build(),
         );
-
+        
         defmt::trace!("EmFat: /proto.prt");
         res.push(
             EntryBuilder::new()
@@ -94,7 +93,7 @@ impl EMfatStorage {
                 .user_data(&PROTO_COMPRESSED as *const CompressedData as usize)
                 .build(),
         );
-
+        
         defmt::trace!("EmFat: /settings.var");
         res.push(
             EntryBuilder::new()

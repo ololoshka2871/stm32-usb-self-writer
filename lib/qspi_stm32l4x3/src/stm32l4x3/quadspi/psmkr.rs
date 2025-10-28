@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:31 - Status mask"]
     #[inline(always)]
-    pub fn mask(&mut self) -> MASK_W {
+    pub fn mask(&mut self) -> MASK_W<'_> {
         MASK_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

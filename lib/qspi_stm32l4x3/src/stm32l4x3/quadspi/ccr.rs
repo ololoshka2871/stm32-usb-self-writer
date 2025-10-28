@@ -460,62 +460,62 @@ impl R {
 impl W {
     #[doc = "Bit 31 - Double data rate mode"]
     #[inline(always)]
-    pub fn ddrm(&mut self) -> DDRM_W {
+    pub fn ddrm(&mut self) -> DDRM_W<'_> {
         DDRM_W { w: self }
     }
     #[doc = "Bit 30 - DDR hold half cycle"]
     #[inline(always)]
-    pub fn dhhc(&mut self) -> DHHC_W {
+    pub fn dhhc(&mut self) -> DHHC_W<'_> {
         DHHC_W { w: self }
     }
     #[doc = "Bit 28 - Send instruction only once mode"]
     #[inline(always)]
-    pub fn sioo(&mut self) -> SIOO_W {
+    pub fn sioo(&mut self) -> SIOO_W<'_> {
         SIOO_W { w: self }
     }
     #[doc = "Bits 26:27 - Functional mode"]
     #[inline(always)]
-    pub fn fmode(&mut self) -> FMODE_W {
+    pub fn fmode(&mut self) -> FMODE_W<'_> {
         FMODE_W { w: self }
     }
     #[doc = "Bits 24:25 - Data mode"]
     #[inline(always)]
-    pub fn dmode(&mut self) -> DMODE_W {
+    pub fn dmode(&mut self) -> DMODE_W<'_> {
         DMODE_W { w: self }
     }
     #[doc = "Bits 18:22 - Number of dummy cycles"]
     #[inline(always)]
-    pub fn dcyc(&mut self) -> DCYC_W {
+    pub fn dcyc(&mut self) -> DCYC_W<'_> {
         DCYC_W { w: self }
     }
     #[doc = "Bits 16:17 - Alternate bytes size"]
     #[inline(always)]
-    pub fn absize(&mut self) -> ABSIZE_W {
+    pub fn absize(&mut self) -> ABSIZE_W<'_> {
         ABSIZE_W { w: self }
     }
     #[doc = "Bits 14:15 - Alternate bytes mode"]
     #[inline(always)]
-    pub fn abmode(&mut self) -> ABMODE_W {
+    pub fn abmode(&mut self) -> ABMODE_W<'_> {
         ABMODE_W { w: self }
     }
     #[doc = "Bits 12:13 - Address size"]
     #[inline(always)]
-    pub fn adsize(&mut self) -> ADSIZE_W {
+    pub fn adsize(&mut self) -> ADSIZE_W<'_> {
         ADSIZE_W { w: self }
     }
     #[doc = "Bits 10:11 - Address mode"]
     #[inline(always)]
-    pub fn admode(&mut self) -> ADMODE_W {
+    pub fn admode(&mut self) -> ADMODE_W<'_> {
         ADMODE_W { w: self }
     }
     #[doc = "Bits 8:9 - Instruction mode"]
     #[inline(always)]
-    pub fn imode(&mut self) -> IMODE_W {
+    pub fn imode(&mut self) -> IMODE_W<'_> {
         IMODE_W { w: self }
     }
     #[doc = "Bits 0:7 - Instruction"]
     #[inline(always)]
-    pub fn instruction(&mut self) -> INSTRUCTION_W {
+    pub fn instruction(&mut self) -> INSTRUCTION_W<'_> {
         INSTRUCTION_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

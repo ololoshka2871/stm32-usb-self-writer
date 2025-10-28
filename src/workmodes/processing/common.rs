@@ -13,7 +13,7 @@ pub struct ChannelConfig {
     pub enabled: bool,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, core::marker::ConstParamTy)]
 pub enum Ordering {
     Greater,
     Less,

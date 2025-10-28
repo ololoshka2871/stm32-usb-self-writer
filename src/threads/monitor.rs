@@ -117,8 +117,8 @@ pub fn monitord<D: freertos_rust::DurationTicks>(
             use crate::threads::sensor_processor::FChannel;
             use freertos_rust::Duration;
 
-            // Output: | P   | T (*C) | TCPU (*C) | Vbat (v)
-            // Output: |    0.100 |    1.000 |   32.890 |    3.360
+            // Output: | P        | T (*C)   | TCPU (*C) | Vbat (v)
+            // Output: |    0.100 |    1.000 |   32.890  |    3.360
 
             static M_HEADER: &str = "\nOutput: | P         | T (*C)    | TCPU (*C) | Vbat (v)\n";
             stat.push_str(M_HEADER);

@@ -5,8 +5,8 @@ MEMORY
   /* These values correspond to the LM3S6965, one of the few devices QEMU can emulate */
 
   /* 3.2 FLASH main features: page size = 2K */
-  FLASH : ORIGIN = 0x08000000, LENGTH = 256K - 1 * 2K
-  SETTINGS: ORIGIN = 0x08000000 + 256K - 1 * 2K, LENGTH = 1 * 2K
+  FLASH : ORIGIN = 0x08000000, LENGTH = 256K-1*2K
+  SETTINGS : ORIGIN = 0x08000000+256K-1*2K, LENGTH = 1*2K
 
   RAM : ORIGIN = 0x20000000, LENGTH = 64K
   RAM2 : ORIGIN = 0x10000000, LENGTH = 0x4000
@@ -17,6 +17,7 @@ MEMORY
 /* You may want to use this variable to locate the call stack and static
    variables in different memory regions. Below is shown the default value */
 /* stack -> RAM2 */
+_stack_end = ORIGIN(RAM2);
 _stack_start = ORIGIN(RAM2) + LENGTH(RAM2);
 
 /* You can use this symbol to customize the location of the .text section */

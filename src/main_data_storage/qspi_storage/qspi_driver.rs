@@ -3,7 +3,8 @@ use core::any::Any;
 use alloc::{boxed::Box, sync::Arc};
 use freertos_rust::{Duration, Mutex, Timer};
 use qspi_stm32lx3::qspi::QspiWriteCommand;
-#[cfg(any(feature = "stm32l433", feature = "stm32l443"))]
+
+#[cfg(feature = "stm32l433")]
 pub use qspi_stm32lx3::{qspi, stm32l4x3::QUADSPI};
 
 pub use qspi::{
@@ -51,7 +52,7 @@ pub enum Opcode {
     /// Write address extander register
     WriteAddrExtanderReg = 0xC5,
 }
-
+#[allow(dead_code)]
 pub trait FlashDriver: Sync + Send {
     fn get_jedec_id(&mut self) -> Result<super::Identification, QspiError>;
     fn get_jedec_id_qio(&mut self) -> Result<super::Identification, QspiError>;
@@ -117,19 +118,27 @@ where
         sys_clk: stm32l4xx_hal::time::Hertz,
         reset: RESET,
     ) -> Result<Arc<Mutex<Box<dyn FlashDriver>>>, QspiError> {
-        qspi.apply_config(
-            QspiConfig::default()
-                /* failsafe config */
-                .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
-                .clock_mode(qspi::ClockMode::Mode3),
-        );
+        let config = QspiConfig::default()
+            /* failsafe config */
+            .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
+            .clock_mode(qspi::ClockMode::Mode3);
 
-        #[allow(invalid_value)]
+        qspi.apply_config(config);
+
         let mut res = Self {
             qspi,
-            config: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            config: &super::flash_config::FLASH_CONFIGS[0], // это затычка чотбы ссылка была валидная
             extender_value: 0xff,
-            sleep_timer: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            sleep_timer: {
+                // Этот таймер затчка, только чтобы поле было заполнено, нельзя оставлять его пустым
+                let timer =
+                    Timer::new(sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS))
+                        .set_auto_reload(false)
+                        .create(|_t| {})
+                        .expect("Failed to create temp timer");
+                timer.stop(Duration::infinite()).ok();
+                timer
+            },
             sleep_state: SleepState::Slepping,
             reset_pin: reset,
         };
@@ -137,7 +146,6 @@ where
         let id = match res.get_jedec_id() {
             Ok(id) => id,
             Err(e) => {
-                core::mem::forget(res); // do not call destructor for res, because invalid fields
                 return Err(e);
             }
         };
@@ -152,10 +160,9 @@ where
 
         if let Some(config) = config {
             defmt::info!("Found flash: {}", config);
-            core::mem::forget(core::mem::replace(&mut res.config, config));
+            let _ = core::mem::replace(&mut res.config, config);
 
             if let Err(e) = res.wake_up() {
-                core::mem::forget(res);
                 return Err(e);
             }
 
@@ -199,7 +206,7 @@ where
                         })
                         .map_err(|_| QspiError::Unknown)?;
                         let _ = timer.stop(Duration::infinite());
-                        core::mem::forget(core::mem::replace(&mut pg.sleep_timer, timer));
+                        let _ = core::mem::replace(&mut pg.sleep_timer, timer);
                     } else {
                         unreachable!();
                     }

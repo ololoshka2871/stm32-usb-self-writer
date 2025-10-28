@@ -13,29 +13,32 @@ unsafe fn DefaultHandler(irqn: i16) {
     // irqn is negative for Cortex-M exceptions
     // irqn is positive for device specific (line IRQ)
     defmt::error!("Unregistred irq: {}", irqn);
-    panic!();
+    loop {}
 }
 
 #[exception]
-unsafe fn HardFault(_ef: &ExceptionFrame) -> ! {
-    defmt::error!("HardFault");
-    panic!()
+unsafe fn HardFault(ef: &ExceptionFrame) -> ! {
+    defmt::error!("HardFault: {}", defmt::Debug2Format(ef));
+    loop {}
 }
 
 // define what happens in an Out Of Memory (OOM) condition
 #[alloc_error_handler]
 fn alloc_error(_layout: Layout) -> ! {
-    defmt::panic!("Heap allocation failed");
+    defmt::error!("Heap allocation failed");
+    loop {}
 }
 
 #[no_mangle]
 fn vApplicationStackOverflowHook(_pxTask: FreeRtosTaskHandle, pcTaskName: FreeRtosCharPtr) {
-    defmt::panic!("Thread {} stack overflow detected!", pcTaskName);
+    defmt::error!("Thread {} stack overflow detected!", pcTaskName);
+    loop {}
 }
 
 #[no_mangle]
 fn vApplicationMallocFailedHook() {
-    defmt::panic!("malloc() failed");
+    defmt::error!("malloc() failed");
+    loop {}
 }
 
 // libcore panic -> this function

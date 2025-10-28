@@ -78,7 +78,7 @@ impl R {
 impl W {
     #[doc = "Bits 0:31 - Status match"]
     #[inline(always)]
-    pub fn match_(&mut self) -> MATCH_W {
+    pub fn match_(&mut self) -> MATCH_W<'_> {
         MATCH_W { w: self }
     }
     #[doc = "Writes raw bits to the register."]

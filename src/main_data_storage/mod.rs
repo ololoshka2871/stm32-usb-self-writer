@@ -31,6 +31,7 @@ lazy_static! {
     static ref NEXT_EMPTY_PAGE: Mutex<MemoryState> = Mutex::new(MemoryState::Undefined).unwrap();
 }
 
+#[allow(dead_code)]
 pub trait PageAccessor {
     fn write(&mut self, data: &[u8]) -> Result<(), flash::Error>;
     fn read_to(&self, offset: usize, dest: &mut [u8]);

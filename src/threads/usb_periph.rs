@@ -3,6 +3,7 @@ use stm32l4xx_hal::device::RCC;
 use stm32l4xx_hal::gpio::{Alternate, PushPull, PA11, PA12};
 use stm32l4xx_hal::stm32;
 
+#[allow(dead_code)]
 pub struct UsbPeriph {
     pub usb: stm32::USB,
     pub pin_dm: PA11<Alternate<PushPull, 10>>,
