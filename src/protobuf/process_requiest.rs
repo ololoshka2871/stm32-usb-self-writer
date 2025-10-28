@@ -3,6 +3,8 @@ use freertos_rust::{FreeRtosError, Mutex};
 
 use crate::{settings::start_writing_settings, workmodes::output_storage::OutputStorage};
 
+const PROTOCOL_VERSION: u32 = super::messages::Info::ProtocolVersion as u32;
+
 pub fn process_requiest(
     req: super::messages::Request,
     mut resp: super::messages::Response,
@@ -18,13 +20,13 @@ pub fn process_requiest(
         return Ok(resp);
     }
 
-    if req.protocol_version != super::messages::Info::ProtocolVersion as u32 {
-        defmt::warn!(
-            "Protobuf: unsupported protocol version {}",
-            req.protocol_version
-        );
-        resp.global_status = super::messages::Status::ProtocolError as i32;
-        return Ok(resp);
+    match req.protocol_version {
+        PROTOCOL_VERSION | 0 => (),
+        v => {
+            defmt::warn!("Protobuf: unsupported protocol version {}", v);
+            resp.global_status = super::messages::Status::ProtocolError as i32;
+            return Ok(resp);
+        }
     }
 
     if let Some(write_settings) = req.write_settings {

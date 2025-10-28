@@ -19,9 +19,9 @@ pub enum Ordering {
     Less,
 }
 
-pub struct OverMonitor<const O: Ordering>(u32);
+pub struct ConditionMonitor<const O: Ordering>(u32);
 
-impl<const O: Ordering> OverMonitor<O> {
+impl<const O: Ordering> ConditionMonitor<O> {
     pub fn check<T: Into<f32>>(&mut self, current: T, limit: f32) -> bool {
         if limit.is_nan() {
             return false;
@@ -30,28 +30,19 @@ impl<const O: Ordering> OverMonitor<O> {
         let cmp = if O == Ordering::Greater {
             current.into() > limit
         } else {
-            current.into() > limit
+            current.into() < limit
         };
 
         if cmp {
-            if self.0 > crate::config::OVER_LIMIT_COUNT {
-                false
-            } else if self.0 == crate::config::OVER_LIMIT_COUNT {
+            if self.0 < crate::config::OVER_LIMIT_COUNT {
                 self.0 += 1;
-                true
-            } else {
                 false
+            } else {
+                true
             }
         } else {
             self.0 = 0;
             false
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn mast_retry(&mut self) {
-        if self.0 > crate::config::OVER_LIMIT_COUNT {
-            self.0 = crate::config::OVER_LIMIT_COUNT;
         }
     }
 }
@@ -126,7 +117,7 @@ pub fn calc_new_target(ch: FChannel, f: f64, sysclk: &Hertz) -> (u32, u32) {
 //---------------------------------------------------------------------------------------
 
 pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
-    static mut P_OVER_MONITOR: OverMonitor<{ Ordering::Greater }> = OverMonitor(0);
+    static mut P_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
     let ft = output.values[FChannel::Temperature as usize];
 
@@ -138,7 +129,7 @@ pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
 
         let overpress_rised = overpress && !ws.monitoring.Ovarpress;
         if overpress {
-            ws.monitoring.Ovarheat = true;
+            ws.monitoring.Ovarpress = true;
         }
 
         let pressure = wrap_mu(pressure, ws.pressureMeassureUnits);
@@ -159,7 +150,7 @@ pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
 }
 
 pub fn calc_temperature(f: f64, output: &mut OutputStorage) {
-    static mut T_OVER_MONITOR: OverMonitor<{ Ordering::Greater }> = OverMonitor(0);
+    static mut T_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
     let (t, overheat_rised) = read_settings(|(ws, _)| {
         let temperature = calc_t(f, &ws.T_Coefficients);
@@ -253,7 +244,7 @@ pub fn process_t_cpu(
     raw: u16,
     sys_clk: Hertz,
 ) -> (bool, Option<u32>) {
-    static mut TCPU_OVER_MONITOR: OverMonitor<{ Ordering::Greater }> = OverMonitor(0);
+    static mut TCPU_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
     defmt::trace!("CPU Temperature {} ({})", celsius_degree, raw);
 
@@ -296,8 +287,8 @@ pub fn process_vbat(
     raw: u16,
     sys_clk: Hertz,
 ) -> (bool, bool, Option<u32>) {
-    static mut VBAT_OVER_MONITOR: OverMonitor<{ Ordering::Greater }> = OverMonitor(0);
-    static mut VBAT_UNDER_MONITOR: OverMonitor<{ Ordering::Less }> = OverMonitor(0);
+    static mut VBAT_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
+    static mut VBAT_UNDER_MONITOR: ConditionMonitor<{ Ordering::Less }> = ConditionMonitor(0);
 
     let (vbat, overvoltage_raised, undervoltage_detected, mt, vbat_enabled) =
         read_settings(|(ws, _)| {
