@@ -31,7 +31,7 @@ pub fn process_requiest(
         match super::process_settings::update_settings(&write_settings, cq) {
             Ok(need_to_write) => {
                 if let Err(e) = start_writing_settings(need_to_write) {
-                    free_rtos_error(e);
+                    free_rtos_settings_error(e);
                     resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
                 }
             }
@@ -47,7 +47,9 @@ pub fn process_requiest(
 
     if req.get_info.is_some() {
         let mut info = super::messages::InfoResponse::default();
-        super::device_info::fill_info(&mut info)?;
+        if let Err(_) = super::device_info::fill_info(&mut info, output) {
+            resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
+        }
         resp.info = Some(info);
     }
 
@@ -61,7 +63,7 @@ pub fn process_requiest(
                 }
                 Ok(need_save) => {
                     if let Err(e) = start_writing_settings(need_save) {
-                        free_rtos_error(e);
+                        free_rtos_settings_error(e);
                         resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
                         false
                     } else {
@@ -133,6 +135,6 @@ fn fill_flash_state(
     Ok(())
 }
 
-fn free_rtos_error(e: FreeRtosError) {
+fn free_rtos_settings_error(e: FreeRtosError) {
     defmt::error!("Failed to store settings: {}", defmt::Debug2Format(&e));
 }

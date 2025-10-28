@@ -1,13 +1,9 @@
-use lazy_static::lazy_static;
-
 use alloc::sync::Arc;
-use freertos_rust::{Duration, FreeRtosError, Mutex};
+use freertos_rust::{FreeRtosError, Mutex};
 
 use crate::{threads::sensor_processor::FChannel, workmodes::output_storage::OutputStorage};
 
-lazy_static! {
-    static ref OUT_STORAGE_LOCK_WAIT: Duration = Duration::ms(5);
-}
+use super::OUT_STORAGE_LOCK_WAIT;
 
 pub fn fill_output(
     output: &mut super::messages::OutputResponse,
@@ -40,9 +36,9 @@ pub fn fill_output(
         match output_storage.lock(*OUT_STORAGE_LOCK_WAIT) {
             Ok(guard) => {
                 output.fp =
-                    Some(guard.frequencys[FChannel::Pressure as usize].unwrap_or(f64::NAN) as f32);
+                    Some(guard.frequencys[FChannel::Pressure as usize].unwrap_or_default() as f32);
                 output.ft = Some(
-                    guard.frequencys[FChannel::Temperature as usize].unwrap_or(f64::NAN) as f32,
+                    guard.frequencys[FChannel::Temperature as usize].unwrap_or_default() as f32,
                 );
             }
             Err(e) => {

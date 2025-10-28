@@ -19,3 +19,9 @@ pub use process_requiest::process_requiest;
 pub use stream::Stream;
 
 pub use messages::{Response, PASSWORD_SIZE, P_COEFFS_COUNT, T_COEFFS_COUNT};
+
+use freertos_rust::Duration;
+
+lazy_static::lazy_static! {
+    pub static ref OUT_STORAGE_LOCK_WAIT: Duration = Duration::ms(5);
+}
