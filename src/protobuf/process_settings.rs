@@ -32,17 +32,20 @@ pub fn fill_settings(settings_resp: &mut super::messages::SettingsResponse) -> R
         settings_resp.serial = ws.Serial;
 
         settings_resp.p_mesure_time_ms = ws.PMesureTime_ms;
-        settings_resp.t_mesure_time_ms = ws.TMesureTime_ms;
+        settings_resp.t1_mesure_time_ms = ws.T1MesureTime_ms;
+        settings_resp.t2_mesure_time_ms = ws.T2MesureTime_ms;
 
         settings_resp.fref = ws.Fref;
 
         settings_resp.p_enabled = ws.P_enabled;
-        settings_resp.t_enabled = ws.T_enabled;
+        settings_resp.t1_enabled = ws.T1_enabled;
+        settings_resp.t2_enabled = ws.T2_enabled;
         settings_resp.tcpu_enabled = ws.TCPUEnabled;
         settings_resp.v_bat_enable = ws.VBatEnabled;
 
         settings_resp.p_coefficients = super::messages::PCoefficients::from(&ws.P_Coefficients);
-        settings_resp.t_coefficients = super::messages::T5Coefficients::from(&ws.T_Coefficients);
+        settings_resp.t1_coefficients = super::messages::T5Coefficients::from(&ws.T1_Coefficients);
+        settings_resp.t2_coefficients = super::messages::T5Coefficients::from(&ws.T2_Coefficients);
 
         settings_resp.p_work_range = super::messages::WorkRange::from(&ws.PWorkRange);
         settings_resp.t_work_range = super::messages::WorkRange::from(&ws.TWorkRange);
@@ -102,11 +105,11 @@ fn verify_parameters(
         }
     }
 
-    if let Some(set_t_mesure_time_ms) = ws.set_t_mesure_time_ms {
-        if set_t_mesure_time_ms > MAX_MT || set_t_mesure_time_ms < MIN_MT {
+    if let Some(set_t1_mesure_time_ms) = ws.set_t1_mesure_time_ms {
+        if set_t1_mesure_time_ms > MAX_MT || set_t1_mesure_time_ms < MIN_MT {
             return Err(SettingActionError::ActionError(format!(
                 "Temperature measure time {} is out of range {} - {}",
-                set_t_mesure_time_ms, MIN_MT, MAX_MT
+                set_t1_mesure_time_ms, MIN_MT, MAX_MT
             )));
         }
     }
@@ -145,14 +148,27 @@ fn verify_parameters(
         }
     }
 
-    if let Some(set_t_coefficients) = &ws.set_t_coefficients {
-        if set_t_coefficients.t0.is_some()
-            || set_t_coefficients.c1.is_some()
-            || set_t_coefficients.c2.is_some()
-            || set_t_coefficients.c3.is_some()
-            || set_t_coefficients.c4.is_some()
-            || set_t_coefficients.c5.is_some()
-            || set_t_coefficients.f0.is_some()
+    if let Some(set_t1_coefficients) = &ws.set_t1_coefficients {
+        if set_t1_coefficients.t0.is_some()
+            || set_t1_coefficients.c1.is_some()
+            || set_t1_coefficients.c2.is_some()
+            || set_t1_coefficients.c3.is_some()
+            || set_t1_coefficients.c4.is_some()
+            || set_t1_coefficients.c5.is_some()
+            || set_t1_coefficients.f0.is_some()
+        {
+            deny_if_password_invalid("TCoefficients")?;
+        }
+    }
+
+    if let Some(set_t2_coefficients) = &ws.set_t2_coefficients {
+        if set_t2_coefficients.t0.is_some()
+            || set_t2_coefficients.c1.is_some()
+            || set_t2_coefficients.c2.is_some()
+            || set_t2_coefficients.c3.is_some()
+            || set_t2_coefficients.c4.is_some()
+            || set_t2_coefficients.c5.is_some()
+            || set_t2_coefficients.f0.is_some()
         {
             deny_if_password_invalid("TCoefficients")?;
         }
@@ -276,7 +292,8 @@ pub fn update_settings(
         store_coeff!(ws.Serial <= w; set_serial; need_write);
 
         store_coeff!(ws.PMesureTime_ms <= w; set_p_mesure_time_ms; need_write);
-        store_coeff!(ws.TMesureTime_ms <= w; set_t_mesure_time_ms; need_write);
+        store_coeff!(ws.T1MesureTime_ms <= w; set_t1_mesure_time_ms; need_write);
+        store_coeff!(ws.T2MesureTime_ms <= w; set_t2_mesure_time_ms; need_write);
 
         store_coeff!(ws.Fref <= w; set_fref; need_write);
 
@@ -293,8 +310,12 @@ pub fn update_settings(
             enable_ch(cq, Channel::FChannel(FChannel::Pressure));
         }
 
-        if !ws.T_enabled & w.set_t_enabled() {
+        if !ws.T1_enabled & w.set_t1_enabled() {
             enable_ch(cq, Channel::FChannel(FChannel::Temperature1));
+        }
+
+        if !ws.T2_enabled & w.set_t2_enabled() {
+            enable_ch(cq, Channel::FChannel(FChannel::Temperature2));
         }
 
         if !ws.TCPUEnabled & w.set_tcpu_enabled() {
@@ -308,7 +329,8 @@ pub fn update_settings(
         //---------------------------------------------------------------------
 
         store_coeff!(ws.P_enabled <= w; set_p_enabled; need_write);
-        store_coeff!(ws.T_enabled <= w; set_t_enabled; need_write);
+        store_coeff!(ws.T1_enabled <= w; set_t1_enabled; need_write);
+        store_coeff!(ws.T2_enabled <= w; set_t2_enabled; need_write);
         store_coeff!(ws.TCPUEnabled <= w; set_tcpu_enabled; need_write);
         store_coeff!(ws.VBatEnabled <= w; set_v_bat_enable; need_write);
 
@@ -333,14 +355,24 @@ pub fn update_settings(
             store_coeff!(ws.P_Coefficients.A[15] <= set_p_coefficients; a15; need_write);
         }
 
-        if let Some(set_t_coefficients) = &w.set_t_coefficients {
-            store_coeff!(ws.T_Coefficients.F0 <= set_t_coefficients; f0; need_write);
-            store_coeff!(ws.T_Coefficients.C[0] <= set_t_coefficients; c1; need_write);
-            store_coeff!(ws.T_Coefficients.C[1] <= set_t_coefficients; c2; need_write);
-            store_coeff!(ws.T_Coefficients.C[2] <= set_t_coefficients; c3; need_write);
-            store_coeff!(ws.T_Coefficients.C[3] <= set_t_coefficients; c4; need_write);
-            store_coeff!(ws.T_Coefficients.C[4] <= set_t_coefficients; c5; need_write);
-            store_coeff!(ws.T_Coefficients.T0 <= set_t_coefficients; t0; need_write);
+        if let Some(set_t1_coefficients) = &w.set_t1_coefficients {
+            store_coeff!(ws.T1_Coefficients.F0 <= set_t1_coefficients; f0; need_write);
+            store_coeff!(ws.T1_Coefficients.C[0] <= set_t1_coefficients; c1; need_write);
+            store_coeff!(ws.T1_Coefficients.C[1] <= set_t1_coefficients; c2; need_write);
+            store_coeff!(ws.T1_Coefficients.C[2] <= set_t1_coefficients; c3; need_write);
+            store_coeff!(ws.T1_Coefficients.C[3] <= set_t1_coefficients; c4; need_write);
+            store_coeff!(ws.T1_Coefficients.C[4] <= set_t1_coefficients; c5; need_write);
+            store_coeff!(ws.T1_Coefficients.T0 <= set_t1_coefficients; t0; need_write);
+        }
+
+        if let Some(set_t2_coefficients) = &w.set_t2_coefficients {
+            store_coeff!(ws.T2_Coefficients.F0 <= set_t2_coefficients; f0; need_write);
+            store_coeff!(ws.T2_Coefficients.C[0] <= set_t2_coefficients; c1; need_write);
+            store_coeff!(ws.T2_Coefficients.C[1] <= set_t2_coefficients; c2; need_write);
+            store_coeff!(ws.T2_Coefficients.C[2] <= set_t2_coefficients; c3; need_write);
+            store_coeff!(ws.T2_Coefficients.C[3] <= set_t2_coefficients; c4; need_write);
+            store_coeff!(ws.T2_Coefficients.C[4] <= set_t2_coefficients; c5; need_write);
+            store_coeff!(ws.T2_Coefficients.T0 <= set_t2_coefficients; t0; need_write);
         }
 
         if let Some(set_p_work_range) = &w.set_p_work_range {

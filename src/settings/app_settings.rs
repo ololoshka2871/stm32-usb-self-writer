@@ -78,17 +78,20 @@ pub(crate) enum PressureMeassureUnits {
 pub(crate) struct AppSettings {
     pub Serial: u32,
     pub PMesureTime_ms: u32,
-    pub TMesureTime_ms: u32,
+    pub T1MesureTime_ms: u32,
+    pub T2MesureTime_ms: u32,
 
     pub Fref: u32,
 
     pub P_enabled: bool,
-    pub T_enabled: bool,
+    pub T1_enabled: bool,
+    pub T2_enabled: bool,
     pub TCPUEnabled: bool,
     pub VBatEnabled: bool,
 
     pub P_Coefficients: P16Coeffs,
-    pub T_Coefficients: T5Coeffs,
+    pub T1_Coefficients: T5Coeffs,
+    pub T2_Coefficients: T5Coeffs,
 
     pub PWorkRange: WorkRange,
     pub TWorkRange: WorkRange,

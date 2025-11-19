@@ -64,8 +64,8 @@ fn mt_getter(ch: FChannel) -> f64 {
     read_settings(|(ws, _)| {
         Ok(match ch {
             FChannel::Pressure => ws.PMesureTime_ms,
-            FChannel::Temperature1 => ws.TMesureTime_ms,
-            FChannel::Temperature2 => ws.TMesureTime_ms, // Используем те же настройки что и для Temperature
+            FChannel::Temperature1 => ws.T1MesureTime_ms,
+            FChannel::Temperature2 => ws.T2MesureTime_ms,
         })
     }) as f64
 }
@@ -80,12 +80,8 @@ pub fn channel_config(ch: FChannel) -> ChannelConfig {
             FChannel::Pressure => ChannelConfig {
                 enabled: ws.P_enabled,
             },
-            FChannel::Temperature1 => ChannelConfig {
-                enabled: ws.T_enabled,
-            },
-            FChannel::Temperature2 => ChannelConfig {
-                enabled: ws.T_enabled, // Используем тот же флаг что и для Temperature
-            },
+            FChannel::Temperature1 => ChannelConfig { enabled: ws.T1_enabled },
+            FChannel::Temperature2 => ChannelConfig { enabled: ws.T2_enabled },
         })
     })
 }
@@ -126,7 +122,7 @@ pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
     let ft = output.values[FChannel::Temperature1 as usize];
 
     let (t, overpress_rised) = read_settings(|(ws, _)| {
-        let pressure = calc_p(fp, ft, &ws.P_Coefficients, ws.T_enabled);
+        let pressure = calc_p(fp, ft, &ws.P_Coefficients, ws.T1_enabled || ws.T2_enabled);
 
         let overpress =
             unsafe { P_OVER_MONITOR.check(pressure as f32, ws.PWorkRange.absolute_maximum) };
@@ -157,7 +153,7 @@ pub fn calc_temperature(f: f64, output: &mut OutputStorage) {
     static mut T_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
     let (t, overheat_rised) = read_settings(|(ws, _)| {
-        let temperature = calc_t(f, &ws.T_Coefficients);
+        let temperature = calc_t(f, &ws.T1_Coefficients);
         let overheat =
             unsafe { T_OVER_MONITOR.check(temperature as f32, ws.TWorkRange.absolute_maximum) };
 
@@ -261,7 +257,7 @@ pub fn process_t_cpu(
             ws.monitoring.CPUOvarheat = true;
         }
 
-        Ok((overheat_rised, ws.TMesureTime_ms, ws.TCPUEnabled))
+        Ok((overheat_rised, ws.T1MesureTime_ms, ws.TCPUEnabled))
     });
     let _ = output.lock(Duration::infinite()).map(|mut guard| {
         if continue_work {
@@ -318,7 +314,7 @@ pub fn process_vbat(
                 v_bat,
                 overvoltage_raised,
                 undervoltage,
-                min(ws.PMesureTime_ms, ws.TMesureTime_ms),
+                min(ws.PMesureTime_ms, min(ws.T1MesureTime_ms, ws.T2MesureTime_ms)),
                 vbat_enabled,
             ))
         });

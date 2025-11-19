@@ -24,12 +24,14 @@ pub static MIN_MT: u32 = 20;
 static DEFAULT_SETTINGS: AppSettings = AppSettings {
     Serial: 0,
     PMesureTime_ms: 20,
-    TMesureTime_ms: 20,
+    T1MesureTime_ms: 20,
+    T2MesureTime_ms: 20,
 
     Fref: crate::config::XTAL_FREQ,
 
     P_enabled: true,
-    T_enabled: true,
+    T1_enabled: true,
+    T2_enabled: true,
     TCPUEnabled: true,
     VBatEnabled: true,
 
@@ -40,7 +42,12 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ],
     },
-    T_Coefficients: app_settings::T5Coeffs {
+    T1_Coefficients: app_settings::T5Coeffs {
+        F0: 0.0,
+        T0: 0.0,
+        C: [1.0, 0.0, 0.0, 0.0, 0.0],
+    },
+    T2_Coefficients: app_settings::T5Coeffs {
         F0: 0.0,
         T0: 0.0,
         C: [1.0, 0.0, 0.0, 0.0, 0.0],

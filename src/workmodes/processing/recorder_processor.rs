@@ -66,7 +66,7 @@ impl RecorderProcessor {
 
                 Ok(FChCfg {
                     p_preheat_time_ms: preheat_time_ms(ws.PMesureTime_ms),
-                    t_preheat_time_ms: preheat_time_ms(ws.TMesureTime_ms),
+                    t_preheat_time_ms: preheat_time_ms(ws.T1MesureTime_ms),
                     p_write_period_ms: sysclk
                         .duration_ms(ws.writeConfig.BaseInterval_ms * ws.writeConfig.PWriteDevider)
                         .to_ms(),
@@ -74,7 +74,7 @@ impl RecorderProcessor {
                         .duration_ms(ws.writeConfig.BaseInterval_ms * ws.writeConfig.TWriteDevider)
                         .to_ms(),
                     p_en: ws.P_enabled,
-                    t_en: ws.T_enabled,
+                    t_en: ws.T1_enabled,
                     tcpu_en: ws.TCPUEnabled,
                     vbat_en: ws.VBatEnabled,
                 })

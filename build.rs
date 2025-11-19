@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-static PROTOBUF_FILE: &str = "ProtobufDevice_0000E006.proto";
+static PROTOBUF_FILE: &str = "ProtobufDevice_0000E009.proto";
 static PROTOBUF_DIR: &str = "src/protobuf/ru.sktbelpa.protobufobjects";
 
 fn gen_protobuf() {

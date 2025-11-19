@@ -5,11 +5,11 @@ use core::{
 
 use alloc::boxed::Box;
 use stm32l4xx_hal::{
-    device::{tim1, tim2, tim15, DMA1, RCC},
+    device::{tim1, tim15, tim2, DMA1, RCC},
     dma::{dma1, Event},
     gpio::{Alternate, PushPull, PA0, PA8, PB14},
     interrupt,
-    stm32l4::stm32l4x3::{Interrupt as IRQ, TIM1, TIM2, TIM15},
+    stm32l4::stm32l4x3::{Interrupt as IRQ, TIM1, TIM15, TIM2},
 };
 use vcell::VolatileCell;
 
@@ -36,6 +36,7 @@ trait Utils<T, DMA> {
     fn configure_debug_freeze();
 }
 
+// TIM1
 impl InCounter<dma1::C6, PA8<Alternate<PushPull, 1>>> for TIM1 {
     fn configure<CB: 'static + OnCycleFinished>(
         &mut self,
@@ -205,7 +206,7 @@ impl Utils<tim1::RegisterBlock, dma1::C6> for TIM1 {
     }
 
     fn select_dma_channel(_dma: &mut dma1::C6) {
-        // stm32l433.pdf:p.299 -> TIM1_UP
+        // stm32l433.pdf:p.299 TIM1_UP ch6, CxS = 7
         unsafe {
             (*DMA1::ptr()).cselr.modify(|_, w| w.c6s().map7());
         }
@@ -248,6 +249,9 @@ impl Utils<tim1::RegisterBlock, dma1::C6> for TIM1 {
     }
 }
 
+//-----------------------------------------------------------------------------
+
+// TIM 2
 impl InCounter<dma1::C2, PA0<Alternate<PushPull, 1>>> for TIM2 {
     fn configure<CB: 'static + OnCycleFinished>(
         &mut self,
@@ -417,7 +421,7 @@ impl Utils<tim2::RegisterBlock, dma1::C2> for TIM2 {
     }
 
     fn select_dma_channel(_dma: &mut dma1::C2) {
-        // stm32l433.pdf:p.299 -> TIM1_UP
+        // stm32l433.pdf:p.299 TIM2_UP ch2, CxS = 4
         unsafe { (*DMA1::ptr()).cselr.modify(|_, w| w.c2s().map4()) }
     }
 
@@ -458,123 +462,9 @@ impl Utils<tim2::RegisterBlock, dma1::C2> for TIM2 {
     }
 }
 
-static mut TIM1_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
-static mut TIM2_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
-static mut TIM15_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
+//-----------------------------------------------------------------------------
 
-static mut DMA1_CH2_CB: Option<DmaCb> = None;
-static mut DMA1_CH6_CB: Option<DmaCb> = None;
-static mut DMA1_CH5_CB: Option<DmaCb> = None;
-
-fn set_cb<CB: 'static + OnCycleFinished>(cb: &mut Option<DmaCb>, f: CB) {
-    *cb = Some(Box::new(f));
-}
-
-// Обнаружено, что фактически значение должно быть на 1 больше
-fn as_target32(prescaler: u32, reload: u32) -> u32 {
-    (prescaler + 1) * reload + 1
-}
-
-fn transform_target32(mut target: u32) -> (u32, u32) {
-    if target < 2 {
-        target = 2;
-    } else {
-        target -= 1;
-    }
-    for prescaler in 1..u16::MAX as u32 {
-        let reload = target / prescaler;
-        if reload < u16::MAX as u32 {
-            return (prescaler - 1, reload);
-        }
-    }
-    panic!("Can't find prescaler for target: {}", target);
-}
-
-unsafe fn call_dma_cb(
-    cb: &Option<DmaCb>,
-    opm_val: bool,
-    captured: u32,
-    prescaler: u32,
-    reload: u32,
-    irq: Interrupt,
-) {
-    if let Some(f) = cb {
-        // reload | prescaler -> 32 bit target
-        f.cycle_finished(
-            if opm_val {
-                TimerEvent::Stop
-            } else {
-                TimerEvent::Start
-            },
-            captured,
-            as_target32(prescaler, reload),
-            irq,
-        );
-    }
-}
-
-#[interrupt]
-unsafe fn DMA1_CH2() {
-    let dma = &*DMA1::ptr();
-    if dma.isr.read().teif2().bits() {
-        panic!(
-            "DMA1_CH2: Transferr error: 0x{:08X} -> 0x{:08X} count {}",
-            dma.cpar2.read().bits(),
-            dma.cmar2.read().bits(),
-            dma.cndtr2.read().bits()
-        );
-    }
-
-    // reset interrupt flag
-    dma.ifcr.write(|w| w.cgif2().set_bit());
-
-    let opm = TIM2::opm();
-
-    #[cfg(feature = "freqmeter-start-stop")]
-    if !opm {
-        TIM2::set_opm()
-    }
-
-    call_dma_cb(
-        &DMA1_CH2_CB,
-        opm,
-        TIM2_DMA_BUF.get(),
-        TIM2::prescaler(),
-        TIM2::target(),
-        IRQ::DMA1_CH2.into(),
-    );
-}
-
-#[interrupt]
-unsafe fn DMA1_CH6() {
-    let dma = &*DMA1::ptr();
-    if dma.isr.read().teif6().bits() {
-        panic!(
-            "DMA1_CH2: Transferr error: 0x{:08X} -> 0x{:08X} count {}",
-            dma.cpar6.read().bits(),
-            dma.cmar6.read().bits(),
-            dma.cndtr6.read().bits()
-        );
-    }
-
-    // reset interrupt flag
-    dma.ifcr.write(|w| w.cgif6().set_bit());
-
-    let opm = TIM1::opm();
-    #[cfg(feature = "freqmeter-start-stop")]
-    if !opm {
-        TIM1::set_opm()
-    }
-
-    call_dma_cb(
-        &DMA1_CH6_CB,
-        opm,
-        TIM1_DMA_BUF.get(),
-        TIM1::prescaler(),
-        TIM1::target(),
-        IRQ::DMA1_CH6.into(),
-    );
-}
+// TIM 15
 
 impl InCounter<dma1::C5, PB14<Alternate<PushPull, 1>>> for TIM15 {
     fn configure<CB: 'static + OnCycleFinished>(
@@ -617,12 +507,14 @@ impl InCounter<dma1::C5, PB14<Alternate<PushPull, 1>>> for TIM15 {
                 .clear_bit()
         });
         // filter - TIM15 has different filter options
-        self.ccmr1_input().modify(|_, w| unsafe { w.ic1f().bits(0b0000) });
+        self.ccmr1_input()
+            .modify(|_, w| unsafe { w.ic1f().bits(0b0000) });
 
         // configure clock input PB14 -> CH1
         // TIM15 uses different approach for external clock
         // Configure as input capture mode
-        self.ccmr1_output().modify(|_, w| unsafe { w.cc1s().bits(0b01) }); // TI1 input
+        self.ccmr1_output()
+            .modify(|_, w| unsafe { w.cc1s().bits(0b01) }); // TI1 input
 
         // initial state
         self.set_target32(crate::config::INITIAL_FREQMETER_TARGET);
@@ -712,6 +604,7 @@ impl InCounter<dma1::C5, PB14<Alternate<PushPull, 1>>> for TIM15 {
     }
 }
 
+
 impl Utils<tim15::RegisterBlock, dma1::C5> for TIM15 {
     fn clk_enable() {
         let apb2enr = unsafe { &(*RCC::ptr()).apb2enr };
@@ -724,9 +617,9 @@ impl Utils<tim15::RegisterBlock, dma1::C5> for TIM15 {
     }
 
     fn select_dma_channel(_dma: &mut dma1::C5) {
-        // stm32l433.pdf:p.299 -> TIM15_UP
+        // stm32l433.pdf:p.299 TIM15_UP ch5, CxS=7
         unsafe {
-            (*DMA1::ptr()).cselr.modify(|_, w| w.c5s().map6());
+            (*DMA1::ptr()).cselr.modify(|_, w| w.c5s().map7());
         }
     }
 
@@ -767,6 +660,93 @@ impl Utils<tim15::RegisterBlock, dma1::C5> for TIM15 {
     }
 }
 
+static mut TIM1_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
+static mut TIM2_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
+static mut TIM15_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
+
+static mut DMA1_CH2_CB: Option<DmaCb> = None;
+static mut DMA1_CH5_CB: Option<DmaCb> = None;
+static mut DMA1_CH6_CB: Option<DmaCb> = None;
+
+fn set_cb<CB: 'static + OnCycleFinished>(cb: &mut Option<DmaCb>, f: CB) {
+    *cb = Some(Box::new(f));
+}
+
+// Обнаружено, что фактически значение должно быть на 1 больше
+fn as_target32(prescaler: u32, reload: u32) -> u32 {
+    (prescaler + 1) * reload + 1
+}
+
+fn transform_target32(mut target: u32) -> (u32, u32) {
+    if target < 2 {
+        target = 2;
+    } else {
+        target -= 1;
+    }
+    for prescaler in 1..u16::MAX as u32 {
+        let reload = target / prescaler;
+        if reload < u16::MAX as u32 {
+            return (prescaler - 1, reload);
+        }
+    }
+    panic!("Can't find prescaler for target: {}", target);
+}
+
+unsafe fn call_dma_cb(
+    cb: &Option<DmaCb>,
+    opm_val: bool,
+    captured: u32,
+    prescaler: u32,
+    reload: u32,
+    irq: Interrupt,
+) {
+    if let Some(f) = cb {
+        // reload | prescaler -> 32 bit target
+        f.cycle_finished(
+            if opm_val {
+                TimerEvent::Stop
+            } else {
+                TimerEvent::Start
+            },
+            captured,
+            as_target32(prescaler, reload),
+            irq,
+        );
+    }
+}
+
+#[interrupt]
+unsafe fn DMA1_CH2() {
+    let dma = &*DMA1::ptr();
+    if dma.isr.read().teif2().bits() {
+        panic!(
+            "DMA1_CH2: Transferr error: 0x{:08X} -> 0x{:08X} count {}",
+            dma.cpar2.read().bits(),
+            dma.cmar2.read().bits(),
+            dma.cndtr2.read().bits()
+        );
+    }
+
+    // reset interrupt flag
+    dma.ifcr.write(|w| w.cgif2().set_bit());
+
+    let opm = TIM2::opm();
+
+    #[cfg(feature = "freqmeter-start-stop")]
+    if !opm {
+        TIM2::set_opm()
+    }
+
+    call_dma_cb(
+        &DMA1_CH2_CB,
+        opm,
+        TIM2_DMA_BUF.get(),
+        TIM2::prescaler(),
+        TIM2::target(),
+        IRQ::DMA1_CH2.into(),
+    );
+}
+
 #[interrupt]
 unsafe fn DMA1_CH5() {
     let dma = &*DMA1::ptr();
@@ -795,5 +775,36 @@ unsafe fn DMA1_CH5() {
         TIM15::prescaler(),
         TIM15::target(),
         IRQ::DMA1_CH5.into(),
+    );
+}
+
+#[interrupt]
+unsafe fn DMA1_CH6() {
+    let dma = &*DMA1::ptr();
+    if dma.isr.read().teif6().bits() {
+        panic!(
+            "DMA1_CH2: Transferr error: 0x{:08X} -> 0x{:08X} count {}",
+            dma.cpar6.read().bits(),
+            dma.cmar6.read().bits(),
+            dma.cndtr6.read().bits()
+        );
+    }
+
+    // reset interrupt flag
+    dma.ifcr.write(|w| w.cgif6().set_bit());
+
+    let opm = TIM1::opm();
+    #[cfg(feature = "freqmeter-start-stop")]
+    if !opm {
+        TIM1::set_opm()
+    }
+
+    call_dma_cb(
+        &DMA1_CH6_CB,
+        opm,
+        TIM1_DMA_BUF.get(),
+        TIM1::prescaler(),
+        TIM1::target(),
+        IRQ::DMA1_CH6.into(),
     );
 }

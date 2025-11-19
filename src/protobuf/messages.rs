@@ -1,6 +1,6 @@
 include!(concat!(
     env!("OUT_DIR"),
-    "/ru.sktbelpa.pressure_self_writer.rs"
+    "/ru.sktbelpa.pressure_self_writer_p2t.rs"
 ));
 
 pub const P_COEFFS_COUNT: usize = 16;

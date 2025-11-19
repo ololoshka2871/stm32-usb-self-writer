@@ -469,8 +469,8 @@ pub fn enable_selected_channels(cq: &Queue<Command>) {
         |(ws, _)| {
             let flags = [
                 (Channel::FChannel(FChannel::Pressure), ws.P_enabled),
-                (Channel::FChannel(FChannel::Temperature1), ws.T_enabled),
-                (Channel::FChannel(FChannel::Temperature2), ws.T_enabled), // Используем тот же флаг для Temperature2
+                (Channel::FChannel(FChannel::Temperature1), ws.T1_enabled),
+                (Channel::FChannel(FChannel::Temperature2), ws.T2_enabled), // Используем отдельные флаги для Temperature1 и Temperature2
                 (Channel::AChannel(AChannel::TCPU), ws.TCPUEnabled),
                 (Channel::AChannel(AChannel::Vbat), ws.VBatEnabled),
             ];
