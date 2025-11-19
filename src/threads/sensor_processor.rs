@@ -19,12 +19,13 @@ use stm32l4xx_hal::{
 };
 use strum::IntoStaticStr;
 
-pub struct SensorPerith<TIM1, DMA1, TIM2, DMA2, PIN1, PIN2, ENPIN1, ENPIN2, VBATPIN, TCPU>
+pub struct SensorPerith<TIM1, DMA1, TIM2, DMA2, TIM15, DMA15, PIN1, PIN2, PIN15, ENPIN1, ENPIN2, ENPIN15, VBATPIN, TCPU>
 // Суть в том, что мы напишем КОНКРЕТНУЮ имплементацию InCounter<DMA> для
 // конкретного счетчика рандомная пара не соберется.
 where
     TIM1: InCounter<DMA1, PIN1>,
     TIM2: InCounter<DMA2, PIN2>,
+    TIM15: InCounter<DMA15, PIN15>,
     TCPU: Send,
     VBATPIN: Send,
 {
@@ -38,6 +39,11 @@ where
     pub timer2_pin: PIN2,
     pub en_2: ENPIN2,
 
+    pub timer15: TIM15,
+    pub timer15_dma_ch: DMA15,
+    pub timer15_pin: PIN15,
+    pub en_15: ENPIN15,
+
     pub adc: ADC,
     pub vbat_pin: VBATPIN,
     pub tcpu_ch: TCPU,
@@ -47,7 +53,8 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, defmt::Format, IntoStaticStr)]
 pub enum FChannel {
     Pressure = 0,
-    Temperature = 1,
+    Temperature1 = 1,
+    Temperature2 = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, defmt::Format, IntoStaticStr)]
@@ -108,8 +115,8 @@ impl OnCycleFinished for DMAFinished {
     }
 }
 
-pub fn sensor_processor<PTIM, PDMA, TTIM, TDMA, PPIN, TPIN, ENPIN1, ENPIN2, TP, VBATPIN, TCPU>(
-    mut perith: SensorPerith<PTIM, PDMA, TTIM, TDMA, PPIN, TPIN, ENPIN1, ENPIN2, VBATPIN, TCPU>,
+pub fn sensor_processor<PTIM, PDMA, TTIM, TDMA, T15TIM, T15DMA, PPIN, TPIN, T15PIN, ENPIN1, ENPIN2, ENPIN15, TP, VBATPIN, TCPU>(
+    mut perith: SensorPerith<PTIM, PDMA, TTIM, TDMA, T15TIM, T15DMA, PPIN, TPIN, T15PIN, ENPIN1, ENPIN2, ENPIN15, VBATPIN, TCPU>,
     command_queue: Arc<freertos_rust::Queue<Command>>,
     ic: Arc<dyn IInterruptController>,
     mut processor: TP,
@@ -118,10 +125,13 @@ pub fn sensor_processor<PTIM, PDMA, TTIM, TDMA, PPIN, TPIN, ENPIN1, ENPIN2, TP, 
 where
     PTIM: InCounter<PDMA, PPIN>,
     TTIM: InCounter<TDMA, TPIN>,
+    T15TIM: InCounter<T15DMA, T15PIN>,
     ENPIN1: OutputPin,
     <ENPIN1 as OutputPin>::Error: Debug,
     ENPIN2: OutputPin,
     <ENPIN2 as OutputPin>::Error: Debug,
+    ENPIN15: OutputPin,
+    <ENPIN15 as OutputPin>::Error: Debug,
     TP: RawValueProcessor,
     TCPU: Send + adc::Channel,
     VBATPIN: Send + adc::Channel,
@@ -165,7 +175,21 @@ where
             master_counter,
             command_queue.clone(),
             ic.clone(),
-            FChannel::Temperature,
+            FChannel::Temperature1,
+        ),
+    );
+
+    let master_counter = MasterCounter::acquire();
+    perith.timer15.configure(
+        master_counter.cnt_addr(),
+        &mut perith.timer15_dma_ch,
+        perith.timer15_pin,
+        ic.as_ref(),
+        DMAFinished::new(
+            master_counter,
+            command_queue.clone(),
+            ic.clone(),
+            FChannel::Temperature2,
         ),
     );
 
@@ -197,17 +221,31 @@ where
     let mut t_controller = FreqmeterController::new(
         &mut perith.timer2,
         perith.en_2,
-        FChannel::Temperature,
-        initial_target(FChannel::Temperature),
+        FChannel::Temperature1,
+        initial_target(FChannel::Temperature1),
         move |guard_time| {
             send_command(
                 cc.as_ref(),
-                Command::TimeoutFChannel(FChannel::Temperature, guard_time),
+                Command::TimeoutFChannel(FChannel::Temperature1, guard_time),
             )
         },
     );
 
-    let mut p_channels: [&mut dyn FChProcessor; 2] = [&mut p_controller, &mut t_controller];
+    let cc = command_queue.clone();
+    let mut t2_controller = FreqmeterController::new(
+        &mut perith.timer15,
+        perith.en_15,
+        FChannel::Temperature2,
+        initial_target(FChannel::Temperature2),
+        move |guard_time| {
+            send_command(
+                cc.as_ref(),
+                Command::TimeoutFChannel(FChannel::Temperature2, guard_time),
+            )
+        },
+    );
+
+    let mut p_channels: [&mut dyn FChProcessor; 3] = [&mut p_controller, &mut t_controller, &mut t2_controller];
     let mut vref = perith.v_ref;
 
     //----------------------------------------------------

@@ -23,7 +23,7 @@ pub const DMA_IRQ_PRIO: u8 = IRQ_HIGEST_PRIO + 5;
 
 //-----------------------------------------------------------------------------
 
-// Приоритеты, обльше -> лучше
+// Приоритеты, больше -> лучше
 
 /// pseudo-idle task prio
 pub const IDLE_TASK_PRIO: u8 = 0;
@@ -81,6 +81,9 @@ pub const START_BLINK_COUNT: u32 = 5;
 pub const START_BLINK_PERIOD_MS: u32 = 500;
 
 //-----------------------------------------------------------------------------
+
+// количество входных каналов
+pub const INPUT_CHANNEL_COUNT: usize = 3;
 
 // включать счетчики за 2 периода измерения
 pub const PREHEAT_MULTIPLIER: u32 = 2;

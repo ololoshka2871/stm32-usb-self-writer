@@ -292,7 +292,7 @@ impl RecorderProcessor {
 
         let enable_t_channel = |enabled| {
             if enabled {
-                send_cc(Command::Start(Channel::FChannel(FChannel::Temperature), 0));
+                send_cc(Command::Start(Channel::FChannel(FChannel::Temperature1), 0));
             }
         };
 
@@ -306,7 +306,7 @@ impl RecorderProcessor {
         };
 
         fn calc_freqs(o: &mut OutputStorage, fm: f64) {
-            for c in [FChannel::Pressure, FChannel::Temperature] {
+            for c in [FChannel::Pressure, FChannel::Temperature1, FChannel::Temperature2] {
                 if let Some(result) = o.results[c as usize] {
                     let f = super::calc_freq(fm, o.targets[c as usize], result);
 
@@ -314,7 +314,11 @@ impl RecorderProcessor {
                     // там внутри есть проверка выхода за рабочий диопазон и перевод в единицы измерения
                     match c {
                         FChannel::Pressure => super::calc_pressure(f, o),
-                        FChannel::Temperature => super::calc_temperature(f, o),
+                        FChannel::Temperature1 => super::calc_temperature(f, o),
+                        FChannel::Temperature2 => {
+                            // Для Temperature2 пока просто сохраняем частоту без расчета температуры
+                            o.values[FChannel::Temperature2 as usize] = Some(f);
+                        }
                     }
                 } else {
                     o.frequencys[c as usize] = None;
@@ -478,7 +482,7 @@ impl RecorderProcessor {
                     enable_t_channel(ch_cfg.t_en);
                     break;
                 }
-                if process_sensor_event(&mut to_t_write_, &mut page, FChannel::Temperature) {
+                if process_sensor_event(&mut to_t_write_, &mut page, FChannel::Temperature1) {
                     enable_p_channel(ch_cfg.p_en);
                     break;
                 }

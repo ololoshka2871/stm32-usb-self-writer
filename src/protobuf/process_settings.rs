@@ -294,7 +294,7 @@ pub fn update_settings(
         }
 
         if !ws.T_enabled & w.set_t_enabled() {
-            enable_ch(cq, Channel::FChannel(FChannel::Temperature));
+            enable_ch(cq, Channel::FChannel(FChannel::Temperature1));
         }
 
         if !ws.TCPUEnabled & w.set_tcpu_enabled() {

@@ -17,7 +17,7 @@ pub fn fill_info(
         Ok(guard) => {
             info.pressure_channel_failed = guard.frequencys[FChannel::Pressure as usize].is_none();
             info.temperature_channel_failed =
-                guard.frequencys[FChannel::Temperature as usize].is_none();
+                guard.frequencys[FChannel::Temperature1 as usize].is_none();
         }
         Err(e) => {
             info.pressure_channel_failed = false;

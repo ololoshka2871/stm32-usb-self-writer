@@ -64,7 +64,8 @@ fn mt_getter(ch: FChannel) -> f64 {
     read_settings(|(ws, _)| {
         Ok(match ch {
             FChannel::Pressure => ws.PMesureTime_ms,
-            FChannel::Temperature => ws.TMesureTime_ms,
+            FChannel::Temperature1 => ws.TMesureTime_ms,
+            FChannel::Temperature2 => ws.TMesureTime_ms, // Используем те же настройки что и для Temperature
         })
     }) as f64
 }
@@ -79,8 +80,11 @@ pub fn channel_config(ch: FChannel) -> ChannelConfig {
             FChannel::Pressure => ChannelConfig {
                 enabled: ws.P_enabled,
             },
-            FChannel::Temperature => ChannelConfig {
+            FChannel::Temperature1 => ChannelConfig {
                 enabled: ws.T_enabled,
+            },
+            FChannel::Temperature2 => ChannelConfig {
+                enabled: ws.T_enabled, // Используем тот же флаг что и для Temperature
             },
         })
     })
@@ -119,7 +123,7 @@ pub fn calc_new_target(ch: FChannel, f: f64, sysclk: &Hertz) -> (u32, u32) {
 pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
     static mut P_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
-    let ft = output.values[FChannel::Temperature as usize];
+    let ft = output.values[FChannel::Temperature1 as usize];
 
     let (t, overpress_rised) = read_settings(|(ws, _)| {
         let pressure = calc_p(fp, ft, &ws.P_Coefficients, ws.T_enabled);
@@ -169,7 +173,7 @@ pub fn calc_temperature(f: f64, output: &mut OutputStorage) {
         Ok((temperature_fixed, overheat_rised))
     });
 
-    output.values[FChannel::Temperature as usize] = Some(t);
+    output.values[FChannel::Temperature1 as usize] = Some(t);
 
     if overheat_rised {
         defmt::error!("Temperature: Overheat detected!");

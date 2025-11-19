@@ -18,7 +18,7 @@ pub fn fill_output(
                 output.pressure =
                     Some(guard.values[FChannel::Pressure as usize].unwrap_or(f64::NAN) as f32);
                 output.temperature =
-                    Some(guard.values[FChannel::Temperature as usize].unwrap_or(f64::NAN) as f32);
+                    Some(guard.values[FChannel::Temperature1 as usize].unwrap_or(f64::NAN) as f32);
                 output.tcpu = Some(guard.t_cpu);
                 output.vbat = Some(guard.vbat as f32);
             }
@@ -38,7 +38,7 @@ pub fn fill_output(
                 output.fp =
                     Some(guard.frequencys[FChannel::Pressure as usize].unwrap_or_default() as f32);
                 output.ft = Some(
-                    guard.frequencys[FChannel::Temperature as usize].unwrap_or_default() as f32,
+                    guard.frequencys[FChannel::Temperature1 as usize].unwrap_or_default() as f32,
                 );
             }
             Err(e) => {
@@ -57,8 +57,8 @@ pub fn fill_output(
                     result: guard.results[FChannel::Pressure as usize].unwrap_or_default(),
                 });
                 output.t_result = Some(super::messages::FreqmeterResult {
-                    target: guard.targets[FChannel::Temperature as usize],
-                    result: guard.results[FChannel::Temperature as usize].unwrap_or_default(),
+                    target: guard.targets[FChannel::Temperature1 as usize],
+                    result: guard.results[FChannel::Temperature1 as usize].unwrap_or_default(),
                 });
 
                 output.adc_tcpu = Some(guard.t_cpu_adc as u32);

@@ -4,7 +4,7 @@ use freertos_rust::{Duration, Mutex, Queue, Task, TaskPriority};
 #[allow(unused_imports)]
 use stm32l4xx_hal::gpio::{
     Alternate, Analog, Output, PushPull, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA6, PA7, PA8, PB0,
-    PC10, PD10, PD11, PD13, PE12,
+    PB14, PC10, PD10, PD11, PD12, PD13, PE12,
 };
 use stm32l4xx_hal::{
     adc::ADC,
@@ -88,13 +88,17 @@ pub struct HighPerformanceMode {
     crc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>,
 
     in_p: PA8<Alternate<PushPull, 1>>,
-    in_t: PA0<Alternate<PushPull, 1>>,
+    in_t1: PA0<Alternate<PushPull, 1>>,
+    in_t2: PB14<Alternate<PushPull, 1>>,
     en_p: PD13<Output<PushPull>>,
-    en_t: PD10<Output<PushPull>>,
+    en_t1: PD10<Output<PushPull>>,
+    en_t2: PD12<Output<PushPull>>,
     dma1_ch2: stm32l4xx_hal::dma::dma1::C2,
+    dma1_ch5: stm32l4xx_hal::dma::dma1::C5,
     dma1_ch6: stm32l4xx_hal::dma::dma1::C6,
     timer1: stm32l4xx_hal::stm32l4::stm32l4x3::TIM1,
     timer2: stm32l4xx_hal::stm32l4::stm32l4x3::TIM2,
+    timer15: stm32l4xx_hal::stm32l4::stm32l4x3::TIM15,
 
     led_pin: PC10<Output<PushPull>>,
 
@@ -130,10 +134,10 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         let mut gpioa = dp.GPIOA.split(&mut rcc.ahb2);
         let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
         let mut gpiod = dp.GPIOD.split(&mut rcc.ahb2);
+        let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
 
         #[cfg(not(feature = "no-flash"))]
         let (qspi, flash_reset_pin) = {
-            let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
             let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
 
             super::common::create_qspi(
@@ -199,9 +203,13 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 .pa8
                 .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
                 .set_speed(Speed::Low),
-            in_t: gpioa
+            in_t1: gpioa
                 .pa0
                 .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl)
+                .set_speed(Speed::Low),
+            in_t2: gpiob
+                .pb14
+                .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrh)
                 .set_speed(Speed::Low),
 
             en_p: gpiod
@@ -212,8 +220,16 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                     GENERATOR_DISABLE_LVL,
                 )
                 .set_speed(Speed::Low),
-            en_t: gpiod
+            en_t1: gpiod
                 .pd10
+                .into_push_pull_output_in_state(
+                    &mut gpiod.moder,
+                    &mut gpiod.otyper,
+                    GENERATOR_DISABLE_LVL,
+                )
+                .set_speed(Speed::Low),
+            en_t2: gpiod
+                .pd12
                 .into_push_pull_output_in_state(
                     &mut gpiod.moder,
                     &mut gpiod.otyper,
@@ -222,9 +238,11 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 .set_speed(Speed::Low),
 
             dma1_ch2: dma_channels.2,
+            dma1_ch5: dma_channels.5,
             dma1_ch6: dma_channels.6,
             timer1: dp.TIM1,
             timer2: dp.TIM2,
+            timer15: dp.TIM15,
 
             led_pin: gpioc
                 .pc10
@@ -389,8 +407,13 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
                 timer2: self.timer2,
                 timer2_dma_ch: self.dma1_ch2,
-                timer2_pin: self.in_t,
-                en_2: self.en_t,
+                timer2_pin: self.in_t1,
+                en_2: self.en_t1,
+
+                timer15: self.timer15,
+                timer15_dma_ch: self.dma1_ch5,
+                timer15_pin: self.in_t2,
+                en_15: self.en_t2,
 
                 vbat_pin: self.vbat_pin,
                 tcpu_ch: tcpu_ch,
@@ -446,7 +469,8 @@ pub fn enable_selected_channels(cq: &Queue<Command>) {
         |(ws, _)| {
             let flags = [
                 (Channel::FChannel(FChannel::Pressure), ws.P_enabled),
-                (Channel::FChannel(FChannel::Temperature), ws.T_enabled),
+                (Channel::FChannel(FChannel::Temperature1), ws.T_enabled),
+                (Channel::FChannel(FChannel::Temperature2), ws.T_enabled), // Используем тот же флаг для Temperature2
                 (Channel::AChannel(AChannel::TCPU), ws.TCPUEnabled),
                 (Channel::AChannel(AChannel::Vbat), ws.VBatEnabled),
             ];

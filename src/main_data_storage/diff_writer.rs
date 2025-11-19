@@ -33,7 +33,8 @@ impl DataPage for DataBlock {
     fn write_header(&mut self, output: &OutputStorage) {
         let h = &mut self.packer.header;
 
-        h.targets = output.targets;
+        h.targets[0] = output.targets[0];
+        h.targets[1] = output.targets[1];
         h.t_cpu = output.t_cpu;
         h.v_bat = output.vbat;
 

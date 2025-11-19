@@ -1,8 +1,10 @@
+use crate::config::INPUT_CHANNEL_COUNT;
+
 pub struct OutputStorage {
-    pub targets: [u32; 2],
-    pub results: [Option<u32>; 2],
-    pub frequencys: [Option<f64>; 2],
-    pub values: [Option<f64>; 2],
+    pub targets: [u32; INPUT_CHANNEL_COUNT],
+    pub results: [Option<u32>; INPUT_CHANNEL_COUNT],
+    pub frequencys: [Option<f64>; INPUT_CHANNEL_COUNT],
+    pub values: [Option<f64>; INPUT_CHANNEL_COUNT],
 
     pub t_cpu: f32,
     pub t_cpu_adc: u16,
@@ -14,10 +16,10 @@ pub struct OutputStorage {
 impl Default for OutputStorage {
     fn default() -> Self {
         Self {
-            targets: [crate::config::INITIAL_FREQMETER_TARGET; 2],
-            results: [None; 2],
-            frequencys: [None; 2],
-            values: [None; 2],
+            targets: [crate::config::INITIAL_FREQMETER_TARGET; INPUT_CHANNEL_COUNT],
+            results: [None; INPUT_CHANNEL_COUNT],
+            frequencys: [None; INPUT_CHANNEL_COUNT],
+            values: [None; INPUT_CHANNEL_COUNT],
 
             t_cpu: 0.0,
             t_cpu_adc: 0,

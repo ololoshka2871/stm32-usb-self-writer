@@ -5,11 +5,11 @@ use core::{
 
 use alloc::boxed::Box;
 use stm32l4xx_hal::{
-    device::{tim1, tim2, DMA1, RCC},
+    device::{tim1, tim2, tim15, DMA1, RCC},
     dma::{dma1, Event},
-    gpio::{Alternate, PushPull, PA0, PA8},
+    gpio::{Alternate, PushPull, PA0, PA8, PB14},
     interrupt,
-    stm32l4::stm32l4x3::{Interrupt as IRQ, TIM1, TIM2},
+    stm32l4::stm32l4x3::{Interrupt as IRQ, TIM1, TIM2, TIM15},
 };
 use vcell::VolatileCell;
 
@@ -460,9 +460,11 @@ impl Utils<tim2::RegisterBlock, dma1::C2> for TIM2 {
 
 static mut TIM1_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
 static mut TIM2_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
+static mut TIM15_DMA_BUF: VolatileCell<u32> = VolatileCell::new(0);
 
 static mut DMA1_CH2_CB: Option<DmaCb> = None;
 static mut DMA1_CH6_CB: Option<DmaCb> = None;
+static mut DMA1_CH5_CB: Option<DmaCb> = None;
 
 fn set_cb<CB: 'static + OnCycleFinished>(cb: &mut Option<DmaCb>, f: CB) {
     *cb = Some(Box::new(f));
@@ -571,5 +573,227 @@ unsafe fn DMA1_CH6() {
         TIM1::prescaler(),
         TIM1::target(),
         IRQ::DMA1_CH6.into(),
+    );
+}
+
+impl InCounter<dma1::C5, PB14<Alternate<PushPull, 1>>> for TIM15 {
+    fn configure<CB: 'static + OnCycleFinished>(
+        &mut self,
+        master_cnt_addr: usize,
+        dma: &mut dma1::C5,
+        _input: PB14<Alternate<PushPull, 1>>,
+        ic: &dyn IInterruptController,
+        dma_complead: CB,
+    ) {
+        unsafe {
+            set_cb(&mut DMA1_CH5_CB, dma_complead);
+        }
+
+        Self::clk_enable();
+
+        // pause
+        self.stop();
+
+        // clear config - TIM15 doesn't have SMCR, use different approach
+        self.cr1.modify(|_, w| {
+            w.ckd()
+                .div1()
+                .opm()
+                .clear_bit()
+                .urs()
+                .set_bit() // update event generation disable
+                .udis()
+                .clear_bit()
+        });
+
+        // stm32l4xx_hal_tim.c:6569
+        self.ccer.modify(|_, w| {
+            w.cc1e()
+                .clear_bit()
+                // raising edge
+                .cc1p()
+                .clear_bit()
+                .cc1np()
+                .clear_bit()
+        });
+        // filter - TIM15 has different filter options
+        self.ccmr1_input().modify(|_, w| unsafe { w.ic1f().bits(0b0000) });
+
+        // configure clock input PB14 -> CH1
+        // TIM15 uses different approach for external clock
+        // Configure as input capture mode
+        self.ccmr1_output().modify(|_, w| unsafe { w.cc1s().bits(0b01) }); // TI1 input
+
+        // initial state
+        self.set_target32(crate::config::INITIAL_FREQMETER_TARGET);
+
+        // reset DMA request
+        self.sr.modify(|_, w| w.uif().clear_bit());
+
+        // DMA request on overflow
+        self.dier.modify(|_, w| w.uie().set_bit());
+
+        atomic::compiler_fence(Ordering::SeqCst);
+
+        // configure dma event src
+        // dma master -> buf
+        dma.stop();
+        dma.set_memory_address(unsafe { TIM15_DMA_BUF.as_ptr() as u32 }, false);
+        dma.set_peripheral_address(master_cnt_addr as u32, false);
+        dma.set_transfer_length(1); // 1 транзакция 32 -> 32
+        Self::select_dma_channel(dma);
+
+        // в dma .ccrX() приватное, поэтому руками
+        unsafe {
+            (*DMA1::ptr()).ccr5.modify(|_, w| {
+                w.pl()
+                    .very_high() // prio
+                    .msize()
+                    .bits32() // 32 bit
+                    .psize()
+                    .bits32() // 32 bit
+                    .circ()
+                    .set_bit() // circular mode
+                    .dir()
+                    .from_peripheral() // p -> M
+                    .teie()
+                    .enabled() // error irq - enable
+                    .htie()
+                    .disabled() // half transfer - disable
+            });
+        }
+
+        // dma enable irq
+        ic.set_priority(IRQ::DMA1_CH5.into(), crate::config::DMA_IRQ_PRIO);
+        ic.unmask(IRQ::DMA1_CH5.into());
+
+        // dma enable
+        dma.listen(Event::TransferComplete);
+        dma.start();
+
+        #[cfg(debug_assertions)]
+        Self::configure_debug_freeze();
+    }
+
+    fn reset(&mut self) {
+        self.egr.write(|w| w.ug().set_bit());
+    }
+
+    fn target32(&self) -> u32 {
+        as_target32(Self::prescaler(), Self::target())
+    }
+
+    fn set_target32(&mut self, target: u32) {
+        if self.cr1.read().cen().bit_is_set() {
+            panic!("Attempt to change target of running Timer 15");
+        }
+
+        let (psc, reload) = transform_target32(target);
+
+        Self::set_prescaler(psc);
+        Self::set_reload(reload);
+
+        self.reset();
+    }
+
+    fn cold_start(&mut self) {
+        self.cr1
+            .modify(|_, w| w.cen().clear_bit().opm().clear_bit());
+        self.cnt
+            .write(|w| unsafe { w.bits(self.arr.read().bits() - 1) });
+        self.cr1.modify(|_, w| w.cen().set_bit());
+    }
+
+    fn stop(&mut self) -> bool {
+        let res = self.cr1.read().cen().bit_is_set();
+        self.cr1.modify(|_, w| w.cen().clear_bit());
+
+        res
+    }
+}
+
+impl Utils<tim15::RegisterBlock, dma1::C5> for TIM15 {
+    fn clk_enable() {
+        let apb2enr = unsafe { &(*RCC::ptr()).apb2enr };
+        let apb2rstr = unsafe { &(*RCC::ptr()).apb2rstr };
+
+        // enable and reset peripheral to a clean slate state
+        apb2enr.modify(|_, w| w.tim15en().set_bit());
+        apb2rstr.modify(|_, w| w.tim15rst().set_bit());
+        apb2rstr.modify(|_, w| w.tim15rst().clear_bit());
+    }
+
+    fn select_dma_channel(_dma: &mut dma1::C5) {
+        // stm32l433.pdf:p.299 -> TIM15_UP
+        unsafe {
+            (*DMA1::ptr()).cselr.modify(|_, w| w.c5s().map6());
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn configure_debug_freeze() {
+        use crate::support::debug_mcu::DEBUG_MCU;
+
+        // __HAL_DBGMCU_FREEZE_TIM15() implementation
+        unsafe {
+            (*DEBUG_MCU)
+                .apb2fz
+                .set((*DEBUG_MCU).apb2fz.get() | (1 << 16));
+        }
+    }
+
+    fn target() -> u32 {
+        unsafe { (*Self::ptr()).arr.read().bits() }
+    }
+
+    fn prescaler() -> u32 {
+        unsafe { (*Self::ptr()).psc.read().bits() }
+    }
+
+    fn set_prescaler(psc: u32) {
+        unsafe { (*Self::ptr()).psc.write(|w| w.bits(psc)) }
+    }
+
+    fn set_reload(reload: u32) {
+        unsafe { (*Self::ptr()).arr.write(|w| w.bits(reload)) }
+    }
+
+    fn opm() -> bool {
+        unsafe { (*Self::ptr()).cr1.read().opm().bit_is_set() }
+    }
+
+    fn set_opm() {
+        unsafe { (*Self::ptr()).cr1.modify(|_, w| w.opm().set_bit()) }
+    }
+}
+
+#[interrupt]
+unsafe fn DMA1_CH5() {
+    let dma = &*DMA1::ptr();
+    if dma.isr.read().teif5().bits() {
+        panic!(
+            "DMA1_CH5: Transferr error: 0x{:08X} -> 0x{:08X} count {}",
+            dma.cpar5.read().bits(),
+            dma.cmar5.read().bits(),
+            dma.cndtr5.read().bits()
+        );
+    }
+
+    // reset interrupt flag
+    dma.ifcr.write(|w| w.cgif5().set_bit());
+
+    let opm = TIM15::opm();
+    #[cfg(feature = "freqmeter-start-stop")]
+    if !opm {
+        TIM15::set_opm()
+    }
+
+    call_dma_cb(
+        &DMA1_CH5_CB,
+        opm,
+        TIM15_DMA_BUF.get(),
+        TIM15::prescaler(),
+        TIM15::target(),
+        IRQ::DMA1_CH5.into(),
     );
 }

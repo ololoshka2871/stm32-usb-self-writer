@@ -53,7 +53,11 @@ impl RawValueProcessor for HighPerformanceProcessor {
                 let o = g.deref_mut();
                 match ch {
                     FChannel::Pressure => super::calc_pressure(f, o),
-                    FChannel::Temperature => super::calc_temperature(f, o),
+                    FChannel::Temperature1 => super::calc_temperature(f, o),
+                    FChannel::Temperature2 => {
+                        // Для Temperature2 пока просто сохраняем частоту без расчета температуры
+                        o.values[FChannel::Temperature2 as usize] = Some(f);
+                    }
                 }
             });
 
