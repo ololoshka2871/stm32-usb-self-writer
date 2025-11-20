@@ -1,4 +1,3 @@
-//pub(crate) mod app_settings;
 mod flash_rw_polcy;
 mod store_async;
 
