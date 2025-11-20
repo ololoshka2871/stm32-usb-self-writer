@@ -47,6 +47,7 @@ target = "thumbv7em-none-eabihf"     # Cortex-M4F and Cortex-M7F (with FPU)
 r = "run --release"
 tl = "test --release --lib"
 ti = "test --release --test integration_test"
+tc = "test --manifest-path lib/core/Cargo.toml --target x86_64-pc-windows-msvc"
 
 # info bloat
 br = "bloat -n 5 --release"

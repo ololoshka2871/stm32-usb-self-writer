@@ -1,8 +1,7 @@
 use core::fmt::Debug;
-
 use prost::{DecodeError, Message};
 
-use super::Stream;
+use super::stream::Stream;
 
 pub fn recive_message_body<T: Debug, S: Stream<T>>(
     stream: &mut S,
@@ -10,6 +9,5 @@ pub fn recive_message_body<T: Debug, S: Stream<T>>(
     let data = stream
         .read_all()
         .map_err(|_| DecodeError::new("Failed to read message body"))?;
-
     super::messages::Request::decode(data.as_slice())
 }

@@ -3,12 +3,18 @@ include!(concat!(
     "/ru.sktbelpa.pressure_self_writer_p2t.rs"
 ));
 
+use crate::app_settings;
+
 pub const P_COEFFS_COUNT: usize = 16;
 pub const T_COEFFS_COUNT: usize = 5;
 pub const PASSWORD_SIZE: usize = 10;
 
-impl PCoefficients {
-    pub(crate) fn from(p_coeffs: &crate::settings::app_settings::P16Coeffs) -> Self {
+pub trait Validator<T> {
+    fn validate(&self) -> Result<(), T>;
+}
+
+impl From<&app_settings::P16Coeffs> for PCoefficients {
+    fn from(p_coeffs: &app_settings::P16Coeffs) -> Self {
         Self {
             ft0: Some(p_coeffs.Fp0),
             fp0: Some(p_coeffs.Ft0),
@@ -33,8 +39,8 @@ impl PCoefficients {
     }
 }
 
-impl T5Coefficients {
-    pub(crate) fn from(t_coeffs: &crate::settings::app_settings::T5Coeffs) -> Self {
+impl From<&app_settings::T5Coeffs> for T5Coefficients {
+    fn from(t_coeffs: &app_settings::T5Coeffs) -> Self {
         Self {
             t0: Some(t_coeffs.T0),
             f0: Some(t_coeffs.F0),
@@ -48,16 +54,18 @@ impl T5Coefficients {
     }
 }
 
-impl WorkRange {
-    pub(crate) fn from(wr: &crate::settings::app_settings::WorkRange) -> Self {
+impl From<&app_settings::WorkRange> for WorkRange {
+    fn from(wr: &app_settings::WorkRange) -> Self {
         Self {
             minimum: Some(wr.minimum),
             maximum: Some(wr.maximum),
             absolute_maximum: Some(wr.absolute_maximum),
         }
     }
+}
 
-    pub(crate) fn validate(&self) -> Result<(), WorkRangeError> {
+impl Validator<WorkRangeError> for WorkRange {
+    fn validate(&self) -> Result<(), WorkRangeError> {
         if let Some(absolute_maximum) = self.absolute_maximum {
             if self.maximum.is_some() && absolute_maximum < self.maximum.unwrap_or_default() {
                 return Err(WorkRangeError::MaximumAboveAbasoluteMaximum);
@@ -85,16 +93,18 @@ pub enum DateField {
     Past,
 }
 
-impl CalibrationDate {
-    pub(crate) fn from(cd: &crate::settings::app_settings::CalibrationDate) -> Self {
+impl From<&app_settings::CalibrationDate> for CalibrationDate {
+    fn from(cd: &app_settings::CalibrationDate) -> Self {
         Self {
             day: Some(cd.Day),
             month: Some(cd.Month),
             year: Some(cd.Year),
         }
     }
+}
 
-    pub fn validate(&self) -> Result<(), DateField> {
+impl Validator<DateField> for CalibrationDate {
+    fn validate(&self) -> Result<(), DateField> {
         use my_proc_macro::{build_day, build_month, build_year};
 
         if let Some(day) = self.day {
@@ -133,8 +143,8 @@ pub enum WorkRangeError {
     MaximumAboveAbasoluteMaximum,
 }
 
-impl WriteConfig {
-    pub(crate) fn from(wc: &crate::settings::app_settings::WriteConfig) -> Self {
+impl From<&app_settings::WriteConfig> for WriteConfig {
+    fn from(wc: &app_settings::WriteConfig) -> Self {
         Self {
             base_interval_ms: Some(wc.BaseInterval_ms),
             p_write_devider: Some(wc.PWriteDevider),

@@ -76,6 +76,13 @@ pub fn is_usb_connected() -> bool {
 mod unit_tests {
     use defmt::assert;
 
+    // Пример использования corelogic (host-testable logic)
+    #[test]
+    fn corelogic_add_works() {
+        let sum = corelogic::add(2, 3);
+        assert!(sum == 5);
+    }
+
     #[test]
     fn it_works() {
         assert!(true)

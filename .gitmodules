@@ -2,5 +2,5 @@
 	path = lib/libfreertos/FreeRTOS-Kernel
 	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
 [submodule "src/protobuf/ru.sktbelpa.protobufobjects"]
-	path = src/protobuf/ru.sktbelpa.protobufobjects
+	path = lib/core/src/protobuf/ru.sktbelpa.protobufobjects
 	url = https://gitea.sctbelpa/SCTBElpa/ru.sktbelpa.protobufobjects.git

@@ -24,4 +24,4 @@ pub(crate) static README_COMPRESSED: CompressedData = packed_string!(
 pub(crate) static DRIVER_INF_COMPRESSED: CompressedData = packed_file!("stm32-USB-Self-writer.inf");
 
 pub(crate) static PROTO_COMPRESSED: CompressedData =
-    packed_file!("src/protobuf/ru.sktbelpa.protobufobjects/ProtobufDevice_0000E006.proto");
+    packed_file!("lib/core/src/protobuf/ru.sktbelpa.protobufobjects/ProtobufDevice_0000E009.proto");

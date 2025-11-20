@@ -10,7 +10,7 @@ use my_proc_macro::store_coeff;
 
 use crate::{
     config::XTAL_FREQ,
-    protobuf::PASSWORD_SIZE,
+    protobuf::{Validator, PASSWORD_SIZE},
     settings::{SettingActionError, MAX_MT, MIN_MT},
     threads::sensor_processor::{Channel, Command},
 };

@@ -21,7 +21,11 @@ This file provides guidance to agents when working with code in this repository.
 
 ## Testing Specifics
 - **Python integration tests** - Run with `SERIAL=/dev/tty<port> py.test -q test/pytest_lib_usb_self_writer.py`
-- **No unit tests in Rust** - All testing done via Python integration with physical device
+**Rust unit & integration tests (defmt-test)**
+- Run unit tests from `mod unit_tests` in `src/lib.rs`:
+	- `cargo test --release --lib`
+- Run integration tests from `tests/integration_test.rs`:
+	- `cargo test --release --test integration_test`
 - **Protocol buffer testing** - Tests validate protobuf message exchange
 
 ## Hardware Dependencies

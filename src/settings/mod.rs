@@ -1,4 +1,4 @@
-pub(crate) mod app_settings;
+//pub(crate) mod app_settings;
 mod flash_rw_polcy;
 mod store_async;
 
@@ -7,14 +7,13 @@ use core::ops::DerefMut;
 use lazy_static::lazy_static;
 
 use alloc::sync::Arc;
-pub(crate) use app_settings::AppSettings;
 use flash_settings_rs::SettingsManager;
 
-use flash_rw_polcy::FlasRWPolcy;
+use flash_rw_polcy::{FlasRWPolcy, Placeholder};
 use freertos_rust::{Duration, DurationTicks, FreeRtosError, Mutex};
 use my_proc_macro::{build_day, build_month, build_year};
 
-use self::{app_settings::NonStoreSettings, flash_rw_polcy::Placeholder};
+pub use corelogic::app_settings::{self, AppSettings, NonStoreSettings};
 
 pub use store_async::start_writing_settings;
 

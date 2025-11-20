@@ -1,10 +1,9 @@
-use core::fmt::Debug;
-
 use alloc::{format, vec::Vec};
 
+use core::fmt::Debug;
 use prost::DecodeError;
 
-use super::Stream;
+use super::stream::Stream;
 
 pub fn recive_md_header<T: Debug, S: Stream<T>>(stream: &mut S) -> Result<usize, DecodeError> {
     decode_magick(stream)?;
@@ -35,7 +34,6 @@ pub fn decode_msg_size<T: Debug, S: Stream<T>>(stream: &mut S) -> Result<usize, 
             break;
         }
     }
-
     match prost::decode_length_delimiter(data.as_slice()) {
         Ok(v) => {
             if v == 0 || v > 1500 {

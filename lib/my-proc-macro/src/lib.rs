@@ -17,7 +17,6 @@ fn parse_binary_expr(input: &syn::parse::ParseStream) -> syn::Result<ExprBinary>
 
 #[proc_macro]
 pub fn store_coeff_nanopb(cfg: TokenStream) -> TokenStream {
-    #[derive(Debug)]
     struct Config {
         pub ex: ExprBinary,
         _separator1: Token![;],
@@ -59,7 +58,6 @@ pub fn store_coeff_nanopb(cfg: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn store_coeff(cfg: TokenStream) -> TokenStream {
-    #[derive(Debug)]
     struct Config {
         pub ex: ExprBinary,
         _separator1: Token![;],
