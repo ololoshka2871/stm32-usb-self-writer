@@ -2,19 +2,20 @@
 #![allow(non_camel_case_types)]
 
 use serde::Serialize;
+use super::protobuf::{P_COEFFS_COUNT, T_COEFFS_COUNT, PASSWORD_SIZE};
 
 #[derive(Debug, Copy, Clone, Serialize)]
 pub struct P16Coeffs {
     pub Fp0: f32,
     pub Ft0: f32,
-    pub A: [f32; 16], // TODO: заменить на константу из protobuf при интеграции
+    pub A: [f32; P_COEFFS_COUNT],
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
 pub struct T5Coeffs {
     pub F0: f32,
     pub T0: f32,
-    pub C: [f32; 5], // TODO: заменить на константу из protobuf при интеграции
+    pub C: [f32; T_COEFFS_COUNT],
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
@@ -85,13 +86,13 @@ pub struct AppSettings {
     pub startDelay: u32,
     pub pressureMeassureUnits: PressureMeassureUnits,
     #[serde(skip_serializing)]
-    pub password: [u8; 10], // TODO: заменить на константу из protobuf при интеграции
+    pub password: [u8; PASSWORD_SIZE],
     pub monitoring: Monitoring,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct NonStoreSettings {
-    pub current_password: [u8; 10],
+    pub current_password: [u8; PASSWORD_SIZE],
 }
 
 impl Monitoring {
