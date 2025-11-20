@@ -108,5 +108,5 @@ test = false
 harness = false
 
 [[test]]
-name = "defmt_tests" # tests/defmt_tests.rs
+name = "integration_test" # tests/integration_test.rs
 harness = false

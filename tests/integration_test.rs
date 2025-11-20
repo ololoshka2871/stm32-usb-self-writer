@@ -3,6 +3,7 @@
 
 use stm32_usb_self_writer as _;
 
+#[cfg(test)]
 #[defmt_test::tests]
 mod tests {
     use super::*;
