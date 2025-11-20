@@ -13,8 +13,8 @@ use stm32l4xx_hal::{
 
 #[allow(unused_imports)]
 use stm32l4xx_hal::gpio::{
-    Alternate, Analog, Output, PushPull, Speed, PA0, PA1, PA2, PA3, PA6, PA7, PA8, PB0, PB14, PC10,
-    PD10, PD11, PD12, PD13, PE12,
+    Alternate, Analog, Output, PushPull, Speed, PA0, PA1, PA2, PA3, PA5, PA6, PA7, PA8, PB0, PB1,
+    PB14, PB2, PB5, PB6, PC10, PD10, PD11, PD12, PD13, PE12,
 };
 
 #[allow(unused_imports)]
@@ -340,11 +340,11 @@ pub struct RecorderMode {
     crc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>,
 
     in_p: PA8<Alternate<PushPull, 1>>,
-    in_t1: PA0<Alternate<PushPull, 1>>,
-    in_t2: PB14<Alternate<PushPull, 1>>,
-    en_p: PD13<Output<PushPull>>,
-    en_t1: PD10<Output<PushPull>>,
-    en_t2: PD12<Output<PushPull>>,
+    in_t1: PA5<Alternate<PushPull, 1>>,
+    in_t2: PB14<Alternate<PushPull, 14>>,
+    en_p: PB5<Output<PushPull>>,
+    en_t1: PB6<Output<PushPull>>,
+    en_t2: PB2<Output<PushPull>>,
     dma1_ch2: stm32l4xx_hal::dma::dma1::C2,
     dma1_ch5: stm32l4xx_hal::dma::dma1::C5,
     dma1_ch6: stm32l4xx_hal::dma::dma1::C6,
@@ -358,15 +358,15 @@ pub struct RecorderMode {
 
     #[cfg(not(feature = "no-flash"))]
     qspi: qspi_stm32lx3::qspi::Qspi<(
-        PA3<Alternate<PushPull, 10>>,
-        PA2<Alternate<PushPull, 10>>,
-        PE12<Alternate<PushPull, 10>>,
-        PB0<Alternate<PushPull, 10>>,
-        PA7<Alternate<PushPull, 10>>,
-        PA6<Alternate<PushPull, 10>>,
+        PA3<Alternate<PushPull, 10>>, // CLK
+        PA2<Alternate<PushPull, 10>>, // NCS
+        PB1<Alternate<PushPull, 10>>, // IO0
+        PB0<Alternate<PushPull, 10>>, // IO1
+        PA7<Alternate<PushPull, 10>>, // IO2
+        PA6<Alternate<PushPull, 10>>, // IO3
     )>,
     #[cfg(not(feature = "no-flash"))]
-    flash_reset_pin: PD11<Output<PushPull>>,
+    flash_reset_pin: PA0<Output<PushPull>>,
 
     led_pin: PC10<Output<PushPull>>,
     scb: cortex_m::peripheral::SCB,
@@ -385,13 +385,10 @@ impl WorkMode<RecorderMode> for RecorderMode {
 
         let mut gpioa = dp.GPIOA.split(&mut rcc.ahb2);
         let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
-        let mut gpiod = dp.GPIOD.split(&mut rcc.ahb2);
         let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
 
         #[cfg(not(feature = "no-flash"))]
         let (qspi, flash_reset_pin) = {
-            let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
-
             super::common::create_qspi(
                 (
                     gpioa
@@ -400,9 +397,9 @@ impl WorkMode<RecorderMode> for RecorderMode {
                     gpioa
                         .pa2
                         .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-                    gpioe
-                        .pe12
-                        .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
+                    gpiob
+                        .pb1
+                        .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
                     gpiob
                         .pb0
                         .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
@@ -413,10 +410,9 @@ impl WorkMode<RecorderMode> for RecorderMode {
                         .pa6
                         .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
                 ),
-                gpiod.pd11.into_push_pull_output_in_state(
-                    // Используем PD11 для flash reset
-                    &mut gpiod.moder,
-                    &mut gpiod.otyper,
+                gpioa.pa0.into_push_pull_output_in_state(
+                    &mut gpioa.moder,
+                    &mut gpioa.otyper,
                     PinState::Low,
                 ),
                 &mut rcc.ahb3,
@@ -446,7 +442,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
                 .set_speed(Speed::Low),
             in_t1: gpioa
-                .pa0
+                .pa5
                 .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl)
                 .set_speed(Speed::Low),
             in_t2: gpiob
@@ -454,27 +450,27 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrh)
                 .set_speed(Speed::Low),
 
-            en_p: gpiod
-                .pd13
+            en_p: gpiob
+                .pb5
                 .into_push_pull_output_in_state(
-                    &mut gpiod.moder,
-                    &mut gpiod.otyper,
+                    &mut gpiob.moder,
+                    &mut gpiob.otyper,
                     GENERATOR_DISABLE_LVL,
                 )
                 .set_speed(Speed::Low),
-            en_t1: gpiod
-                .pd10
+            en_t1: gpiob
+                .pb6
                 .into_push_pull_output_in_state(
-                    &mut gpiod.moder,
-                    &mut gpiod.otyper,
+                    &mut gpiob.moder,
+                    &mut gpiob.otyper,
                     GENERATOR_DISABLE_LVL,
                 )
                 .set_speed(Speed::Low),
-            en_t2: gpiod
-                .pd12
+            en_t2: gpiob
+                .pb2
                 .into_push_pull_output_in_state(
-                    &mut gpiod.moder,
-                    &mut gpiod.otyper,
+                    &mut gpiob.moder,
+                    &mut gpiob.otyper,
                     GENERATOR_DISABLE_LVL,
                 )
                 .set_speed(Speed::Low),
@@ -512,7 +508,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
         self.crc.clone()
     }
 
-    fn ini_static(&mut self) {
+    fn init_static(&mut self) {
         crate::settings::init(self.flash(), self.crc());
     }
 
@@ -608,10 +604,10 @@ impl WorkMode<RecorderMode> for RecorderMode {
                     timer2_pin: self.in_t1,
                     en_2: self.en_t1,
 
-                    timer15: self.timer15,
-                    timer15_dma_ch: self.dma1_ch5,
-                    timer15_pin: self.in_t2,
-                    en_15: self.en_t2,
+                    timer3: self.timer15,
+                    timer3_dma_ch: self.dma1_ch5,
+                    timer3_pin: self.in_t2,
+                    en_3: self.en_t2,
 
                     vbat_pin: self.vbat_pin,
                     tcpu_ch: tcpu_ch,

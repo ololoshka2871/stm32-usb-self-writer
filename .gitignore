@@ -13,9 +13,6 @@ target/
 !.vscode/extensions.json
 !.vscode/settings.json
 
-# doc
-*.pdf
-
 # gen
 test/protocol_pb2.py
 __pycache__/
@@ -23,7 +20,3 @@ __pycache__/
 
 #regs
 *_regs.txt
-
-# pdf
-*.pdf
-!3_channels.pdf

@@ -19,13 +19,28 @@ use stm32l4xx_hal::{
 };
 use strum::IntoStaticStr;
 
-pub struct SensorPerith<TIM1, DMA1, TIM2, DMA2, TIM15, DMA15, PIN1, PIN2, PIN15, ENPIN1, ENPIN2, ENPIN15, VBATPIN, TCPU>
+pub struct SensorPerith<
+    TIM1,
+    DMA1,
+    TIM2,
+    DMA2,
+    TIM3,
+    DMA3,
+    PIN1,
+    PIN2,
+    PIN3,
+    ENPIN1,
+    ENPIN2,
+    ENPIN15,
+    VBATPIN,
+    TCPU,
+>
 // Суть в том, что мы напишем КОНКРЕТНУЮ имплементацию InCounter<DMA> для
 // конкретного счетчика рандомная пара не соберется.
 where
     TIM1: InCounter<DMA1, PIN1>,
     TIM2: InCounter<DMA2, PIN2>,
-    TIM15: InCounter<DMA15, PIN15>,
+    TIM3: InCounter<DMA3, PIN3>,
     TCPU: Send,
     VBATPIN: Send,
 {
@@ -39,10 +54,10 @@ where
     pub timer2_pin: PIN2,
     pub en_2: ENPIN2,
 
-    pub timer15: TIM15,
-    pub timer15_dma_ch: DMA15,
-    pub timer15_pin: PIN15,
-    pub en_15: ENPIN15,
+    pub timer3: TIM3,
+    pub timer3_dma_ch: DMA3,
+    pub timer3_pin: PIN3,
+    pub en_3: ENPIN15,
 
     pub adc: ADC,
     pub vbat_pin: VBATPIN,
@@ -115,8 +130,39 @@ impl OnCycleFinished for DMAFinished {
     }
 }
 
-pub fn sensor_processor<PTIM, PDMA, TTIM, TDMA, T15TIM, T15DMA, PPIN, TPIN, T15PIN, ENPIN1, ENPIN2, ENPIN15, TP, VBATPIN, TCPU>(
-    mut perith: SensorPerith<PTIM, PDMA, TTIM, TDMA, T15TIM, T15DMA, PPIN, TPIN, T15PIN, ENPIN1, ENPIN2, ENPIN15, VBATPIN, TCPU>,
+pub fn sensor_processor<
+    PTIM,
+    PDMA,
+    T1TIM,
+    T1DMA,
+    T2TIM,
+    T2DMA,
+    PPIN,
+    T1PIN,
+    T2PIN,
+    ENPPIN,
+    ENT1PIN,
+    ENT2PIN,
+    TP,
+    VBATPIN,
+    TCPU,
+>(
+    mut perith: SensorPerith<
+        PTIM,
+        PDMA,
+        T1TIM,
+        T1DMA,
+        T2TIM,
+        T2DMA,
+        PPIN,
+        T1PIN,
+        T2PIN,
+        ENPPIN,
+        ENT1PIN,
+        ENT2PIN,
+        VBATPIN,
+        TCPU,
+    >,
     command_queue: Arc<freertos_rust::Queue<Command>>,
     ic: Arc<dyn IInterruptController>,
     mut processor: TP,
@@ -124,14 +170,14 @@ pub fn sensor_processor<PTIM, PDMA, TTIM, TDMA, T15TIM, T15DMA, PPIN, TPIN, T15P
 ) -> !
 where
     PTIM: InCounter<PDMA, PPIN>,
-    TTIM: InCounter<TDMA, TPIN>,
-    T15TIM: InCounter<T15DMA, T15PIN>,
-    ENPIN1: OutputPin,
-    <ENPIN1 as OutputPin>::Error: Debug,
-    ENPIN2: OutputPin,
-    <ENPIN2 as OutputPin>::Error: Debug,
-    ENPIN15: OutputPin,
-    <ENPIN15 as OutputPin>::Error: Debug,
+    T1TIM: InCounter<T1DMA, T1PIN>,
+    T2TIM: InCounter<T2DMA, T2PIN>,
+    ENPPIN: OutputPin,
+    <ENPPIN as OutputPin>::Error: Debug,
+    ENT1PIN: OutputPin,
+    <ENT1PIN as OutputPin>::Error: Debug,
+    ENT2PIN: OutputPin,
+    <ENT2PIN as OutputPin>::Error: Debug,
     TP: RawValueProcessor,
     TCPU: Send + adc::Channel,
     VBATPIN: Send + adc::Channel,
@@ -180,10 +226,10 @@ where
     );
 
     let master_counter = MasterCounter::acquire();
-    perith.timer15.configure(
+    perith.timer3.configure(
         master_counter.cnt_addr(),
-        &mut perith.timer15_dma_ch,
-        perith.timer15_pin,
+        &mut perith.timer3_dma_ch,
+        perith.timer3_pin,
         ic.as_ref(),
         DMAFinished::new(
             master_counter,
@@ -233,8 +279,8 @@ where
 
     let cc = command_queue.clone();
     let mut t2_controller = FreqmeterController::new(
-        &mut perith.timer15,
-        perith.en_15,
+        &mut perith.timer3,
+        perith.en_3,
         FChannel::Temperature2,
         initial_target(FChannel::Temperature2),
         move |guard_time| {
@@ -245,7 +291,8 @@ where
         },
     );
 
-    let mut p_channels: [&mut dyn FChProcessor; 3] = [&mut p_controller, &mut t_controller, &mut t2_controller];
+    let mut p_channels: [&mut dyn FChProcessor; crate::config::INPUT_CHANNEL_COUNT] =
+        [&mut p_controller, &mut t_controller, &mut t2_controller];
     let mut vref = perith.v_ref;
 
     //----------------------------------------------------

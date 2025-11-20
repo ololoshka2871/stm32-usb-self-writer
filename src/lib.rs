@@ -47,7 +47,7 @@ where
     T: WorkMode<T>,
 {
     let mut mode = T::new(p, dp);
-    mode.ini_static();
+    mode.init_static();
     mode.configure_clock();
     mode.print_clock_config();
 

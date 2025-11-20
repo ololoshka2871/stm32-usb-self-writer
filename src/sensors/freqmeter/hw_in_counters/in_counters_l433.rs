@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use stm32l4xx_hal::{
     device::{tim1, tim15, tim2, DMA1, RCC},
     dma::{dma1, Event},
-    gpio::{Alternate, PushPull, PA0, PA8, PB14},
+    gpio::{Alternate, PushPull, PA8, PB14, PA5},
     interrupt,
     stm32l4::stm32l4x3::{Interrupt as IRQ, TIM1, TIM15, TIM2},
 };
@@ -252,12 +252,12 @@ impl Utils<tim1::RegisterBlock, dma1::C6> for TIM1 {
 //-----------------------------------------------------------------------------
 
 // TIM 2
-impl InCounter<dma1::C2, PA0<Alternate<PushPull, 1>>> for TIM2 {
+impl InCounter<dma1::C2, PA5<Alternate<PushPull, 1>>> for TIM2 {
     fn configure<CB: 'static + OnCycleFinished>(
         &mut self,
         master_cnt_addr: usize,
         dma: &mut dma1::C2,
-        _input: PA0<Alternate<PushPull, 1>>,
+        _input: PA5<Alternate<PushPull, 1>>,
         ic: &dyn IInterruptController,
         dma_complead: CB,
     ) {
@@ -465,13 +465,12 @@ impl Utils<tim2::RegisterBlock, dma1::C2> for TIM2 {
 //-----------------------------------------------------------------------------
 
 // TIM 15
-
-impl InCounter<dma1::C5, PB14<Alternate<PushPull, 1>>> for TIM15 {
+impl InCounter<dma1::C5, PB14<Alternate<PushPull, 14>>> for TIM15 {
     fn configure<CB: 'static + OnCycleFinished>(
         &mut self,
         master_cnt_addr: usize,
         dma: &mut dma1::C5,
-        _input: PB14<Alternate<PushPull, 1>>,
+        _input: PB14<Alternate<PushPull, 14>>,
         ic: &dyn IInterruptController,
         dma_complead: CB,
     ) {
@@ -603,7 +602,6 @@ impl InCounter<dma1::C5, PB14<Alternate<PushPull, 1>>> for TIM15 {
         res
     }
 }
-
 
 impl Utils<tim15::RegisterBlock, dma1::C5> for TIM15 {
     fn clk_enable() {

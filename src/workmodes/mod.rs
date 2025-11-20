@@ -15,7 +15,7 @@ pub use recorder_mode::RecorderMode;
 
 pub trait WorkMode<T> {
     fn new(p: cortex_m::Peripherals, dp: stm32l4xx_hal::device::Peripherals) -> T;
-    fn ini_static(&mut self);
+    fn init_static(&mut self);
     fn configure_clock(&mut self);
     fn start_threads(self) -> Result<(), FreeRtosError>;
     fn print_clock_config(&self);
