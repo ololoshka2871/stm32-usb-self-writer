@@ -1,0 +1,13 @@
+[package]
+authors = ["ololoshka2871"]
+edition = "2018"
+readme = "README.md"
+name = "freertos-core"
+version = "0.1.0"
+
+[dependencies]
+freertos-rust = { git = "https://github.com/lobaro/FreeRTOS-rust.git", rev = "e365ca8a11" }
+
+[build-dependencies]
+cc = "1"
+freertos-cargo-build = "0.1.1"

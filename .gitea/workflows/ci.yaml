@@ -43,7 +43,7 @@ jobs:
         run: cargo build --release
 
       - name: Create binary dist
-        run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/stm32-usb-self-writer stm32-usb-self-writer.bin
+        run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer stm32-usb-self-writer.bin
 
       - uses: SebRollen/toml-action@v1.2.0
         id: read_version

@@ -6,6 +6,9 @@ name = "stm32-usb-self-writer"
 version = "0.4.0"
 resolver = "2"
 
+[package.metadata.cargo-embed]
+chip = "STM32L433RCTx"
+
 [dependencies]
 num = { version = "0.4", default-features = false, features = ["alloc"] }
 num-derive = "0.4"
@@ -37,7 +40,10 @@ defmt-macros = "1"
 panic-abort = "0.3"
 
 stm32l4xx-hal = { git = "https://github.com/stm32-rs/stm32l4xx-hal.git", rev = "e4835469a38b844865a6d5eef91542bdc6822941", features = ["rt", "unproven", "stm32-usbd"] }
+
+# freertos
 freertos-rust = { git = "https://github.com/lobaro/FreeRTOS-rust.git", rev = "e365ca8a11" }
+freertos-core = { path = "lib/libfreertos" }
 
 self-recorder-packet = { git = "https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git", rev = "e25058f91e", default-features = false }
 
@@ -50,10 +56,14 @@ qspi-stm32lx3 = { path = "lib/qspi_stm32l4x3" }
 
 prost = { version = "0.14", default-features = false, features = ["derive"] }
 
+[dev-dependencies]
+defmt-test = "0.4"
+
 [build-dependencies]
-cc = "1.0.52"
-freertos-cargo-build = "0.1.1"
+cc = "1"
+#freertos-cargo-build = "0.1.1"
 prost-build = "0.14"
+defmt-test = { version = "0.4" }
 
 [profile.dev.package."*"]
 opt-level = "z"
@@ -86,4 +96,17 @@ freqmeter-start-stop = []
 led-blink = []
 led-blink-each-block = ["led-blink"]
 flash-sleep = []
-no-flash = [] # only for debug 
+no-flash = [] # only for debug
+
+### Defmt test integration
+
+[[bin]] # <- add this section
+name = "self-writer" # src/bin/self-writer.rs
+test = false
+
+[lib]
+harness = false
+
+[[test]]
+name = "defmt_tests" # tests/defmt_tests.rs
+harness = false

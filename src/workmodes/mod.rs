@@ -10,6 +10,9 @@ pub(crate) mod common;
 pub mod output_storage;
 pub mod processing;
 
+pub use high_performance_mode::HighPerformanceMode;
+pub use recorder_mode::RecorderMode;
+
 pub trait WorkMode<T> {
     fn new(p: cortex_m::Peripherals, dp: stm32l4xx_hal::device::Peripherals) -> T;
     fn ini_static(&mut self);
