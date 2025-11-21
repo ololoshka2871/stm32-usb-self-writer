@@ -3,8 +3,10 @@ use core::{cmp::min, ops::Sub};
 use freertos_rust::{CurrentTask, Duration, DurationTicks, Mutex};
 use stm32l4xx_hal::time::Hertz;
 
+use corelogic::app_settings::{P16Coeffs, T5Coeffs};
+
 use crate::{
-    settings::{app_settings::NonStoreSettings, AppSettings},
+    settings::{AppSettings, NonStoreSettings},
     threads::sensor_processor::FChannel,
     workmodes::{common::HertzExt, output_storage::OutputStorage},
 };
@@ -80,8 +82,12 @@ pub fn channel_config(ch: FChannel) -> ChannelConfig {
             FChannel::Pressure => ChannelConfig {
                 enabled: ws.P_enabled,
             },
-            FChannel::Temperature1 => ChannelConfig { enabled: ws.T1_enabled },
-            FChannel::Temperature2 => ChannelConfig { enabled: ws.T2_enabled },
+            FChannel::Temperature1 => ChannelConfig {
+                enabled: ws.T1_enabled,
+            },
+            FChannel::Temperature2 => ChannelConfig {
+                enabled: ws.T2_enabled,
+            },
         })
     })
 }
@@ -179,7 +185,7 @@ pub fn calc_temperature(f: f64, output: &mut OutputStorage) {
 
 //-----------------------------------------------------------------------------
 
-fn calc_t(f: f64, coeffs: &crate::settings::app_settings::T5Coeffs) -> f64 {
+fn calc_t(f: f64, coeffs: &T5Coeffs) -> f64 {
     let temp_f_minus_fp0 = f - coeffs.F0 as f64;
     let mut result = coeffs.T0 as f64;
     let mut mu = temp_f_minus_fp0;
@@ -192,12 +198,7 @@ fn calc_t(f: f64, coeffs: &crate::settings::app_settings::T5Coeffs) -> f64 {
     result
 }
 
-fn calc_p(
-    fp: f64,
-    ft: Option<f64>,
-    coeffs: &crate::settings::app_settings::P16Coeffs,
-    t_enabled: bool,
-) -> f64 {
+fn calc_p(fp: f64, ft: Option<f64>, coeffs: &P16Coeffs, t_enabled: bool) -> f64 {
     let presf_minus_fp0 = fp - coeffs.Fp0 as f64;
     let ft_minus_ft0 = if !t_enabled || ft.is_none() {
         0.0f64
@@ -220,8 +221,8 @@ fn calc_p(
     k0 + presf_minus_fp0 * (k1 + presf_minus_fp0 * (k2 + presf_minus_fp0 * k3))
 }
 
-fn wrap_mu(p: f64, mu: crate::settings::app_settings::PressureMeassureUnits) -> f64 {
-    use crate::settings::app_settings::PressureMeassureUnits;
+fn wrap_mu(p: f64, mu: crate::settings::PressureMeassureUnits) -> f64 {
+    use crate::settings::PressureMeassureUnits;
 
     let multiplier = match mu {
         PressureMeassureUnits::INVALID_ZERO => panic!(),
@@ -314,7 +315,10 @@ pub fn process_vbat(
                 v_bat,
                 overvoltage_raised,
                 undervoltage,
-                min(ws.PMesureTime_ms, min(ws.T1MesureTime_ms, ws.T2MesureTime_ms)),
+                min(
+                    ws.PMesureTime_ms,
+                    min(ws.T1MesureTime_ms, ws.T2MesureTime_ms),
+                ),
                 vbat_enabled,
             ))
         });

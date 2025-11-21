@@ -1,5 +1,6 @@
 mod flash_rw_polcy;
 mod store_async;
+mod app_settings;
 
 use core::ops::DerefMut;
 
@@ -11,10 +12,12 @@ use flash_settings_rs::SettingsManager;
 use flash_rw_polcy::{FlasRWPolcy, Placeholder};
 use freertos_rust::{Duration, DurationTicks, FreeRtosError, Mutex};
 use my_proc_macro::{build_day, build_month, build_year};
-
-pub use corelogic::app_settings::{self, AppSettings, NonStoreSettings};
-
 pub use store_async::start_writing_settings;
+
+pub use app_settings::AppSettings;
+pub use corelogic::app_settings::*;
+
+use crate::config;
 
 pub static MAX_MT: u32 = 5000;
 pub static MIN_MT: u32 = 20;
@@ -25,7 +28,7 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     T1MesureTime_ms: 20,
     T2MesureTime_ms: 20,
 
-    Fref: crate::config::XTAL_FREQ,
+    Fref: config::XTAL_FREQ,
 
     P_enabled: true,
     T1_enabled: true,
@@ -33,49 +36,49 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     TCPUEnabled: true,
     VBatEnabled: true,
 
-    P_Coefficients: app_settings::P16Coeffs {
+    P_Coefficients: P16Coeffs {
         Fp0: 0.0,
         Ft0: 0.0,
         A: [
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ],
     },
-    T1_Coefficients: app_settings::T5Coeffs {
+    T1_Coefficients: T5Coeffs {
         F0: 0.0,
         T0: 0.0,
         C: [1.0, 0.0, 0.0, 0.0, 0.0],
     },
-    T2_Coefficients: app_settings::T5Coeffs {
+    T2_Coefficients: T5Coeffs {
         F0: 0.0,
         T0: 0.0,
         C: [1.0, 0.0, 0.0, 0.0, 0.0],
     },
 
-    PWorkRange: app_settings::WorkRange {
+    PWorkRange: WorkRange {
         minimum: 0.0,
         maximum: 100.0,
         absolute_maximum: f32::NAN,
     },
 
-    TWorkRange: app_settings::WorkRange {
+    TWorkRange: WorkRange {
         minimum: -50.0,
         maximum: 120.0,
         absolute_maximum: f32::NAN,
     },
 
-    TCPUWorkRange: app_settings::WorkRange {
+    TCPUWorkRange: WorkRange {
         minimum: -50.0,
         maximum: 120.0,
         absolute_maximum: f32::NAN,
     },
 
-    VbatWorkRange: app_settings::WorkRange {
+    VbatWorkRange: WorkRange {
         minimum: 2.2, //2.05 for TPS6223xx
         maximum: 5.5,
         absolute_maximum: 6.0, // TPS6223xx
     },
 
-    calibration_date: app_settings::CalibrationDate {
+    calibration_date: CalibrationDate {
         Day: build_day!(),
         Month: build_month!(),
         Year: build_year!(),
@@ -84,7 +87,7 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     PZeroCorrection: 0.0,
     TZeroCorrection: 0.0,
 
-    writeConfig: app_settings::WriteConfig {
+    writeConfig: WriteConfig {
         BaseInterval_ms: 20,
         PWriteDevider: 1,
         TWriteDevider: 1,
@@ -92,11 +95,11 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
 
     startDelay: 0,
 
-    pressureMeassureUnits: app_settings::PressureMeassureUnits::Bar,
+    pressureMeassureUnits: PressureMeassureUnits::Bar,
 
     password: *b"_PASSWORD_",
 
-    monitoring: app_settings::Monitoring {
+    monitoring: Monitoring {
         Ovarpress: false,
         Ovarheat: false,
         CPUOvarheat: false,
@@ -131,16 +134,11 @@ pub(crate) fn init(
 ) {
     defmt::trace!("Init settings");
     if let Ok(mut guard) = SETTINGS.lock(Duration::infinite()) {
-        guard.replace(SettingsManager::<
-            AppSettings,
-            NonStoreSettings,
-            stm32l4xx_hal::traits::flash::Error,
-            FlasRWPolcy,
-        >::new(
+        guard.replace(SettingsManagerType::new(
             &DEFAULT_SETTINGS,
             FlasRWPolcy::create(&SETTINGS_PLACEHOLDER, flash, crc),
             NonStoreSettings {
-                current_password: [0u8; 10],
+                current_password: [0u8; corelogic::protobuf::PASSWORD_SIZE],
             },
         ));
     } else {

@@ -112,7 +112,7 @@ pub fn protobuf_server<B: usb_device::bus::UsbBus>(
                     id,
                     freertos_rust::FreeRtosUtils::get_tick_count() as u64,
                 ),
-                protobuf::ArcOutputProvider(output.clone()),
+                protobuf::OutputStorageProvider(output.clone()),
                 |cmd: crate::threads::sensor_processor::Command| {
                     cq.send(cmd, Duration::infinite()).map_err(|_| ())
                 },

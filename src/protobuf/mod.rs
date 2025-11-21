@@ -15,8 +15,6 @@ pub use process_request::process_request;
 
 use freertos_rust::Duration;
 
-use corelogic::output_provider::OutputProvider;
-
 use crate::workmodes::output_storage::OutputStorage;
 use alloc::sync::Arc;
 use freertos_rust::Mutex;
@@ -25,9 +23,9 @@ lazy_static::lazy_static! {
     pub static ref OUT_STORAGE_LOCK_WAIT: Duration = Duration::ms(5);
 }
 
-pub struct ArcOutputProvider(pub Arc<Mutex<OutputStorage>>);
+pub struct OutputStorageProvider(pub Arc<Mutex<OutputStorage>>);
 
-impl OutputProvider for ArcOutputProvider {
+impl corelogic::output_provider::OutputProvider for OutputStorageProvider {
     type Output = OutputStorage;
     type Error = freertos_rust::FreeRtosError;
 

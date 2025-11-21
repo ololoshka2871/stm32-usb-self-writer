@@ -48,55 +48,39 @@ pub struct Monitoring {
     pub OverPower: bool,
 }
 
+impl Monitoring {
+    pub fn is_set(&self) -> bool {
+        self.Ovarpress | self.Ovarheat | self.CPUOvarheat | self.OverPower
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, num_derive::FromPrimitive)]
 pub enum PressureMeassureUnits {
     INVALID_ZERO = 0,
-    Pa = 0x00220000,
-    Bar = 0x004E0000,
-    At = 0x00A10000,
-    mmH20 = 0x00A20000,
-    mHg = 0x00A30000,
-    Atm = 0x00A40000,
-    PSI = 0x00AB0000,
-}
 
-#[derive(Debug, Copy, Clone, Serialize)]
-pub struct AppSettings {
-    pub Serial: u32,
-    pub PMesureTime_ms: u32,
-    pub T1MesureTime_ms: u32,
-    pub T2MesureTime_ms: u32,
-    pub Fref: u32,
-    pub P_enabled: bool,
-    pub T1_enabled: bool,
-    pub T2_enabled: bool,
-    pub TCPUEnabled: bool,
-    pub VBatEnabled: bool,
-    pub P_Coefficients: P16Coeffs,
-    pub T1_Coefficients: T5Coeffs,
-    pub T2_Coefficients: T5Coeffs,
-    pub PWorkRange: WorkRange,
-    pub TWorkRange: WorkRange,
-    pub TCPUWorkRange: WorkRange,
-    pub VbatWorkRange: WorkRange,
-    pub PZeroCorrection: f32,
-    pub TZeroCorrection: f32,
-    pub calibration_date: CalibrationDate,
-    pub writeConfig: WriteConfig,
-    pub startDelay: u32,
-    pub pressureMeassureUnits: PressureMeassureUnits,
-    #[serde(skip_serializing)]
-    pub password: [u8; PASSWORD_SIZE],
-    pub monitoring: Monitoring,
+    /// Паскали
+    Pa = 0x00220000,
+
+    /// Бар
+    Bar = 0x004E0000,
+
+    /// Ат (кгс/см2)
+    At = 0x00A10000,
+
+    /// мм водного столба
+    mmH20 = 0x00A20000,
+
+    /// м. ртутного столба
+    mHg = 0x00A30000,
+
+    /// Атм
+    Atm = 0x00A40000,
+
+    /// Фунт на квадратный дюйм
+    PSI = 0x00AB0000,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct NonStoreSettings {
     pub current_password: [u8; PASSWORD_SIZE],
-}
-
-impl Monitoring {
-    pub fn is_set(&self) -> bool {
-        self.Ovarpress | self.Ovarheat | self.CPUOvarheat | self.OverPower
-    }
 }
