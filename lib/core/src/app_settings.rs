@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 
+use super::protobuf::{PASSWORD_SIZE, P_COEFFS_COUNT, T_COEFFS_COUNT};
 use serde::Serialize;
-use super::protobuf::{P_COEFFS_COUNT, T_COEFFS_COUNT, PASSWORD_SIZE};
 
 #[derive(Debug, Copy, Clone, Serialize)]
 pub struct P16Coeffs {
@@ -83,4 +83,54 @@ pub enum PressureMeassureUnits {
 #[derive(Debug, Copy, Clone)]
 pub struct NonStoreSettings {
     pub current_password: [u8; PASSWORD_SIZE],
+}
+
+// ------------------------ Testing ------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitoring_is_set() {
+        let m = Monitoring {
+            Ovarpress: false,
+            Ovarheat: false,
+            CPUOvarheat: false,
+            OverPower: false,
+        };
+        assert!(!m.is_set());
+
+        let m2 = Monitoring {
+            Ovarpress: true,
+            Ovarheat: false,
+            CPUOvarheat: false,
+            OverPower: false,
+        };
+        assert!(m2.is_set());
+
+        let m3 = Monitoring {
+            Ovarpress: false,
+            Ovarheat: true,
+            CPUOvarheat: false,
+            OverPower: false,
+        };
+        assert!(m3.is_set());
+
+        let m4 = Monitoring {
+            Ovarpress: false,
+            Ovarheat: false,
+            CPUOvarheat: true,
+            OverPower: false,
+        };
+        assert!(m4.is_set());
+
+        let m5 = Monitoring {
+            Ovarpress: false,
+            Ovarheat: false,
+            CPUOvarheat: false,
+            OverPower: true,
+        };
+        assert!(m5.is_set());
+    }
 }

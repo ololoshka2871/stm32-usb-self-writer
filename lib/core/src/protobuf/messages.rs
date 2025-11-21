@@ -166,3 +166,97 @@ impl Response {
         res
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use my_proc_macro::{build_day, build_month, build_year};
+
+    #[test]
+    fn calibration_date_valid_equal_to_build_date() {
+        let cd = CalibrationDate {
+            day: Some(build_day!()),
+            month: Some(build_month!()),
+            year: Some(build_year!()),
+        };
+
+        assert!(cd.validate().is_ok());
+    }
+
+    #[test]
+    fn calibration_date_day_invalid() {
+        let cd = CalibrationDate {
+            day: Some(32),
+            month: None,
+            year: None,
+        };
+
+        assert!(matches!(cd.validate(), Err(DateField::Day)));
+    }
+
+    #[test]
+    fn calibration_date_month_invalid() {
+        let cd = CalibrationDate {
+            day: None,
+            month: Some(13),
+            year: None,
+        };
+
+        assert!(matches!(cd.validate(), Err(DateField::Month)));
+    }
+
+    #[test]
+    fn calibration_date_year_past() {
+        let cd = CalibrationDate {
+            day: None,
+            month: None,
+            year: Some(build_year!() - 1),
+        };
+
+        assert!(matches!(cd.validate(), Err(DateField::Past)));
+    }
+
+    #[test]
+    fn workrange_valid() {
+        let wr = WorkRange {
+            minimum: Some(10.0),
+            maximum: Some(20.0),
+            absolute_maximum: Some(30.0),
+        };
+
+        assert!(wr.validate().is_ok());
+    }
+
+    #[test]
+    fn workrange_max_above_abs() {
+        let wr = WorkRange {
+            minimum: None,
+            maximum: Some(40.0),
+            absolute_maximum: Some(30.0),
+        };
+
+        assert!(matches!(wr.validate(), Err(WorkRangeError::MaximumAboveAbasoluteMaximum)));
+    }
+
+    #[test]
+    fn workrange_min_above_abs() {
+        let wr = WorkRange {
+            minimum: Some(40.0),
+            maximum: None,
+            absolute_maximum: Some(30.0),
+        };
+
+        assert!(matches!(wr.validate(), Err(WorkRangeError::MinimumAboveAbsoluteMaximum)));
+    }
+
+    #[test]
+    fn workrange_min_above_max() {
+        let wr = WorkRange {
+            minimum: Some(30.0),
+            maximum: Some(20.0),
+            absolute_maximum: None,
+        };
+
+        assert!(matches!(wr.validate(), Err(WorkRangeError::MinimumAboveMaximum)));
+    }
+}

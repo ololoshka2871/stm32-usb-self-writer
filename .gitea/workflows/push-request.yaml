@@ -42,3 +42,10 @@ jobs:
           https_proxy: ""
         run: |
           cargo build --release
+
+      - name: Run host-side tests
+        env:
+          http_proxy: ""
+          https_proxy: ""
+        run: |
+          cargo test --manifest-path lib/core/Cargo.toml --target x86_64-pc-windows-msvc
