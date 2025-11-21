@@ -11,6 +11,8 @@ pub use corelogic::{
     protobuf::PASSWORD_SIZE,
 };
 
+pub const TEMPERATURE_CHANNEL_COUNT: usize = crate::config::INPUT_CHANNEL_COUNT - 1;
+
 #[derive(Debug, Copy, Clone, Serialize)]
 pub struct AppSettings {
     pub Serial: u32,
@@ -21,14 +23,12 @@ pub struct AppSettings {
     pub Fref: u32,
 
     pub P_enabled: bool,
-    pub T1_enabled: bool,
-    pub T2_enabled: bool,
+    pub T_enabled: [bool; TEMPERATURE_CHANNEL_COUNT],
     pub TCPUEnabled: bool,
     pub VBatEnabled: bool,
 
     pub P_Coefficients: P16Coeffs,
-    pub T1_Coefficients: T5Coeffs,
-    pub T2_Coefficients: T5Coeffs,
+    pub T_Coefficients: [T5Coeffs; TEMPERATURE_CHANNEL_COUNT],
 
     pub PWorkRange: WorkRange,
     pub TWorkRange: WorkRange,
@@ -36,7 +36,7 @@ pub struct AppSettings {
     pub VbatWorkRange: WorkRange,
 
     pub PZeroCorrection: f32,
-    pub TZeroCorrection: f32,
+    pub TZeroCorrection: [f32; TEMPERATURE_CHANNEL_COUNT],
 
     pub calibration_date: CalibrationDate,
 

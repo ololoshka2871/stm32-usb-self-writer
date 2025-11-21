@@ -17,13 +17,16 @@ pub fn fill_info<E>(
 
     match output_provider.with_output(|guard| {
         info.pressure_channel_failed = guard.frequencys[FChannel::Pressure as usize].is_none();
-        info.temperature_channel_failed =
+        info.temperature1_channel_failed =
             guard.frequencys[FChannel::Temperature1 as usize].is_none();
+        info.temperature2_channel_failed =
+            guard.frequencys[FChannel::Temperature2 as usize].is_none();
     }) {
         Ok(()) => {}
         Err(e) => {
             info.pressure_channel_failed = false;
-            info.temperature_channel_failed = false;
+            info.temperature1_channel_failed = false;
+            info.temperature2_channel_failed = false;
             err = Some(OutputProviderError::Other(e));
         }
     }

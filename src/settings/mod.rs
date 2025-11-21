@@ -1,6 +1,6 @@
+mod app_settings;
 mod flash_rw_polcy;
 mod store_async;
-mod app_settings;
 
 use core::ops::DerefMut;
 
@@ -31,8 +31,7 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     Fref: config::XTAL_FREQ,
 
     P_enabled: true,
-    T1_enabled: true,
-    T2_enabled: true,
+    T_enabled: [true; app_settings::TEMPERATURE_CHANNEL_COUNT],
     TCPUEnabled: true,
     VBatEnabled: true,
 
@@ -43,16 +42,11 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ],
     },
-    T1_Coefficients: T5Coeffs {
+    T_Coefficients: [T5Coeffs {
         F0: 0.0,
         T0: 0.0,
         C: [1.0, 0.0, 0.0, 0.0, 0.0],
-    },
-    T2_Coefficients: T5Coeffs {
-        F0: 0.0,
-        T0: 0.0,
-        C: [1.0, 0.0, 0.0, 0.0, 0.0],
-    },
+    }; app_settings::TEMPERATURE_CHANNEL_COUNT],
 
     PWorkRange: WorkRange {
         minimum: 0.0,
@@ -85,7 +79,7 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     },
 
     PZeroCorrection: 0.0,
-    TZeroCorrection: 0.0,
+    TZeroCorrection: [0.0; app_settings::TEMPERATURE_CHANNEL_COUNT],
 
     writeConfig: WriteConfig {
         BaseInterval_ms: 20,

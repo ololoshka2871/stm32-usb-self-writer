@@ -52,12 +52,12 @@ impl RawValueProcessor for HighPerformanceProcessor {
             let _ = self.output.lock(Duration::infinite()).map(|mut g| {
                 let o = g.deref_mut();
                 match ch {
-                    FChannel::Pressure => super::calc_pressure(f, o),
-                    FChannel::Temperature1 => super::calc_temperature(f, o),
-                    FChannel::Temperature2 => {
-                        // Для Temperature2 пока просто сохраняем частоту без расчета температуры
-                        o.values[FChannel::Temperature2 as usize] = Some(f);
-                    }
+                    FChannel::Pressure => super::calc_pressure(
+                        f,
+                        o.values[crate::config::TEMP_CHANNEL_FOR_P_CORRECTION as usize],
+                        o,
+                    ),
+                    ch => super::calc_temperature(f, ch, o),
                 }
             });
 

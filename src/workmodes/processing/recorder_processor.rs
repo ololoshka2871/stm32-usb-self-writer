@@ -23,8 +23,9 @@ pub struct FChCfg {
     pub p_write_period_ms: u32,
     pub t_write_period_ms: u32,
 
-    pub p_en: bool,
-    pub t_en: bool,
+    pub p_en: bool,            // канал давления включен?
+    pub t_correction_en: bool, // канал температуры для коррекции давления включен?
+    pub t_en: bool,            // канал температуры включен?
     pub tcpu_en: bool,
     pub vbat_en: bool,
 }
@@ -64,6 +65,12 @@ impl RecorderProcessor {
                         .to_ms()
                 };
 
+                let (t_correction_en, t_en) = match crate::config::TEMP_CHANNEL_FOR_P_CORRECTION {
+                    FChannel::Temperature1 => (ws.T_enabled[0], ws.T_enabled[1]),
+                    FChannel::Temperature2 => (ws.T_enabled[1], ws.T_enabled[0]),
+                    _ => panic!("TEMP_CHANNEL_FOR_P_CORRECTION is set to non-temperature channel"),
+                };
+
                 Ok(FChCfg {
                     p_preheat_time_ms: preheat_time_ms(ws.PMesureTime_ms),
                     t_preheat_time_ms: preheat_time_ms(ws.T1MesureTime_ms),
@@ -74,7 +81,8 @@ impl RecorderProcessor {
                         .duration_ms(ws.writeConfig.BaseInterval_ms * ws.writeConfig.TWriteDevider)
                         .to_ms(),
                     p_en: ws.P_enabled,
-                    t_en: ws.T1_enabled,
+                    t_correction_en,
+                    t_en,
                     tcpu_en: ws.TCPUEnabled,
                     vbat_en: ws.VBatEnabled,
                 })
@@ -290,9 +298,9 @@ impl RecorderProcessor {
             }
         };
 
-        let enable_t_channel = |enabled| {
+        let enable_t_channel = |ch, enabled| {
             if enabled {
-                send_cc(Command::Start(Channel::FChannel(FChannel::Temperature1), 0));
+                send_cc(Command::Start(Channel::FChannel(ch), 0));
             }
         };
 
@@ -306,18 +314,27 @@ impl RecorderProcessor {
         };
 
         fn calc_freqs(o: &mut OutputStorage, fm: f64) {
-            for c in [FChannel::Pressure, FChannel::Temperature1, FChannel::Temperature2] {
+            for c in [
+                FChannel::Pressure,
+                FChannel::Temperature1,
+                FChannel::Temperature2,
+            ] {
                 if let Some(result) = o.results[c as usize] {
                     let f = super::calc_freq(fm, o.targets[c as usize], result);
 
                     o.frequencys[c as usize] = Some(f);
                     // там внутри есть проверка выхода за рабочий диопазон и перевод в единицы измерения
                     match c {
-                        FChannel::Pressure => super::calc_pressure(f, o),
-                        FChannel::Temperature1 => super::calc_temperature(f, o),
-                        FChannel::Temperature2 => {
-                            // Для Temperature2 пока просто сохраняем частоту без расчета температуры
-                            o.values[FChannel::Temperature2 as usize] = Some(f);
+                        FChannel::Pressure => super::calc_pressure(
+                            f,
+                            o.values[crate::config::TEMP_CHANNEL_FOR_P_CORRECTION as usize],
+                            o,
+                        ),
+                        c => {
+                            // не будем считать температуру если это канал компенсации давления
+                            if c != crate::config::TEMP_CHANNEL_FOR_P_CORRECTION {
+                                super::calc_temperature(f, c, o);
+                            }
                         }
                     }
                 } else {

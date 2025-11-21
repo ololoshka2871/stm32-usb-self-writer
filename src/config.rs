@@ -1,5 +1,7 @@
 use stm32l4xx_hal::gpio::PinState;
 
+use crate::threads::sensor_processor::FChannel;
+
 //-----------------------------------------------------------------------------
 
 pub const XTAL_FREQ: u32 = 24_000_000;
@@ -94,6 +96,9 @@ pub const F_CH_START_COUNT: u32 = 2;
 // Экспериментальное значение, время с подачи питания до запуска генератора
 // Канал температуры дает 100kHz как минимум перые 100 ms, берем запас
 pub const GEN_COLD_STARTUP_TIME_MS: u32 = 200;
+
+// Канал темепературы который используется для коррекции давления
+pub const TEMP_CHANNEL_FOR_P_CORRECTION: FChannel = FChannel::Temperature2;
 
 //-----------------------------------------------------------------------------
 

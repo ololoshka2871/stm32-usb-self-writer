@@ -35,13 +35,16 @@ pub fn fill_output<E>(
         match output_provider.with_output(|guard| {
             output.fp =
                 Some(guard.frequencys[FChannel::Pressure as usize].unwrap_or_default() as f32);
-            output.ft =
+            output.ft1 =
                 Some(guard.frequencys[FChannel::Temperature1 as usize].unwrap_or_default() as f32);
+            output.ft2 =
+                Some(guard.frequencys[FChannel::Temperature2 as usize].unwrap_or_default() as f32);
         }) {
             Ok(()) => {}
             Err(e) => {
                 output.fp = Some(f32::NAN);
-                output.ft = Some(f32::NAN);
+                output.ft1 = Some(f32::NAN);
+                output.ft2 = Some(f32::NAN);
                 err = Some(OutputProviderError::Other(e));
             }
         }
@@ -53,9 +56,13 @@ pub fn fill_output<E>(
                 target: guard.targets[FChannel::Pressure as usize],
                 result: guard.results[FChannel::Pressure as usize].unwrap_or_default(),
             });
-            output.t_result = Some(super::messages::FreqmeterResult {
+            output.t1_result = Some(super::messages::FreqmeterResult {
                 target: guard.targets[FChannel::Temperature1 as usize],
                 result: guard.results[FChannel::Temperature1 as usize].unwrap_or_default(),
+            });
+            output.t2_result = Some(super::messages::FreqmeterResult {
+                target: guard.targets[FChannel::Temperature2 as usize],
+                result: guard.results[FChannel::Temperature2 as usize].unwrap_or_default(),
             });
 
             output.adc_tcpu = Some(guard.t_cpu_adc as u32);
@@ -64,7 +71,8 @@ pub fn fill_output<E>(
             Ok(()) => {}
             Err(e) => {
                 output.p_result = Some(super::messages::FreqmeterResult::default());
-                output.t_result = Some(super::messages::FreqmeterResult::default());
+                output.t1_result = Some(super::messages::FreqmeterResult::default());
+                output.t2_result = Some(super::messages::FreqmeterResult::default());
 
                 output.adc_tcpu = Some(u32::default());
                 output.adc_vbat = Some(u32::default());

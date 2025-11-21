@@ -82,11 +82,8 @@ pub fn channel_config(ch: FChannel) -> ChannelConfig {
             FChannel::Pressure => ChannelConfig {
                 enabled: ws.P_enabled,
             },
-            FChannel::Temperature1 => ChannelConfig {
-                enabled: ws.T1_enabled,
-            },
-            FChannel::Temperature2 => ChannelConfig {
-                enabled: ws.T2_enabled,
+            ch => ChannelConfig {
+                enabled: ws.T_enabled[ch as usize - 1],
             },
         })
     })
@@ -122,13 +119,20 @@ pub fn calc_new_target(ch: FChannel, f: f64, sysclk: &Hertz) -> (u32, u32) {
 
 //---------------------------------------------------------------------------------------
 
-pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
+pub fn calc_pressure(fp: f64, ft: Option<f64>, output: &mut OutputStorage) {
     static mut P_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
-    let ft = output.values[FChannel::Temperature1 as usize];
-
     let (t, overpress_rised) = read_settings(|(ws, _)| {
-        let pressure = calc_p(fp, ft, &ws.P_Coefficients, ws.T1_enabled || ws.T2_enabled);
+        let pressure = calc_p(
+            fp,
+            ft,
+            &ws.P_Coefficients,
+            match crate::config::TEMP_CHANNEL_FOR_P_CORRECTION {
+                FChannel::Temperature1 => ws.T_enabled[0],
+                FChannel::Temperature2 => ws.T_enabled[1],
+                _ => panic!("calc_pressure called for non-temperature channel"),
+            },
+        );
 
         let overpress =
             unsafe { P_OVER_MONITOR.check(pressure as f32, ws.PWorkRange.absolute_maximum) };
@@ -155,11 +159,13 @@ pub fn calc_pressure(fp: f64, output: &mut OutputStorage) {
     }
 }
 
-pub fn calc_temperature(f: f64, output: &mut OutputStorage) {
+pub fn calc_temperature(f: f64, channel: FChannel, output: &mut OutputStorage) {
     static mut T_OVER_MONITOR: ConditionMonitor<{ Ordering::Greater }> = ConditionMonitor(0);
 
     let (t, overheat_rised) = read_settings(|(ws, _)| {
-        let temperature = calc_t(f, &ws.T1_Coefficients);
+        let coeffs = &ws.T_Coefficients[channel as usize - 1];
+
+        let temperature = calc_t(f, coeffs);
         let overheat =
             unsafe { T_OVER_MONITOR.check(temperature as f32, ws.TWorkRange.absolute_maximum) };
 
@@ -168,14 +174,14 @@ pub fn calc_temperature(f: f64, output: &mut OutputStorage) {
             ws.monitoring.Ovarheat = true;
         }
 
-        let temperature_fixed = temperature + ws.TZeroCorrection as f64;
+        let temperature_fixed = temperature + ws.TZeroCorrection[channel as usize] as f64;
 
         //defmt::trace!("Temperature {} ({}Hz)", temperature, f);
 
         Ok((temperature_fixed, overheat_rised))
     });
 
-    output.values[FChannel::Temperature1 as usize] = Some(t);
+    output.values[channel as usize] = Some(t);
 
     if overheat_rised {
         defmt::error!("Temperature: Overheat detected!");
