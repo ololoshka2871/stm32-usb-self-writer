@@ -106,11 +106,16 @@ pub fn protobuf_server<B: usb_device::bus::UsbBus>(
 
         let response = {
             let id = request.id;
-            match protobuf::process_requiest(
+            match protobuf::process_request(
                 request,
-                protobuf::new_response(id),
-                &output,
-                cq.as_ref(),
+                protobuf::Response::new_with_id_and_timestamp(
+                    id,
+                    freertos_rust::FreeRtosUtils::get_tick_count() as u64,
+                ),
+                protobuf::ArcOutputProvider(output.clone()),
+                |cmd: crate::threads::sensor_processor::Command| {
+                    cq.send(cmd, Duration::infinite()).map_err(|_| ())
+                },
             ) {
                 Ok(r) => r,
                 Err(_) => {

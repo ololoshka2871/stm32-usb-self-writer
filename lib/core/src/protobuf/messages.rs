@@ -152,3 +152,17 @@ impl From<&app_settings::WriteConfig> for WriteConfig {
         }
     }
 }
+
+impl Response {
+    pub fn new_with_id_and_timestamp(id: u32, timestamp: u64) -> Self {
+        let mut res = Self::default();
+
+        res.id = id;
+        res.device_id = Info::PressureSelfWriterId as u32;
+        res.protocol_version = Info::ProtocolVersion as u32;
+        res.global_status = Status::Ok as i32;
+        res.timestamp = timestamp;
+
+        res
+    }
+}

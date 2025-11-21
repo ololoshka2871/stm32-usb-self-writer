@@ -5,7 +5,7 @@ use alloc::{
     string::{String, ToString},
 };
 
-use freertos_rust::{Duration, Queue};
+use freertos_rust::Duration;
 use my_proc_macro::store_coeff;
 
 use crate::{
@@ -24,7 +24,7 @@ fn strlenn(str: &[u8], max: usize) -> usize {
             return i;
         }
     }
-    max
+    max_scan
 }
 
 pub fn fill_settings(settings_resp: &mut super::messages::SettingsResponse) -> Result<(), ()> {
@@ -273,7 +273,7 @@ fn verify_parameters(
 
 pub fn update_settings(
     w: &super::messages::WriteSettingsReq,
-    cq: &Queue<Command>,
+    cmd_caller: &impl Fn(Command) -> Result<(), ()>,
 ) -> Result<bool, SettingActionError<String>> {
     use crate::threads::sensor_processor::{AChannel, FChannel};
 
@@ -299,31 +299,36 @@ pub fn update_settings(
 
         //-------------------------send enable signal--------------------------
 
-        fn enable_ch(cq: &Queue<Command>, ch: Channel) {
+        fn enable_ch(
+            cq_put: &impl Fn(Command) -> Result<(), ()>,
+            ch: Channel,
+        ) -> Result<(), String> {
             let cmd = Command::Start(ch, 0);
-            let _ = cq.send(cmd, Duration::infinite()).map_err(|_e| {
-                defmt::error!("Failed to enable {} channel", ch,);
-            });
+            if let Err(_) = cq_put(cmd) {
+                Err(format!("Failed to enable {:?} channel", ch))
+            } else {
+                Ok(())
+            }
         }
 
         if !ws.P_enabled & w.set_p_enabled() {
-            enable_ch(cq, Channel::FChannel(FChannel::Pressure));
+            enable_ch(cmd_caller, Channel::FChannel(FChannel::Pressure))?;
         }
 
         if !ws.T1_enabled & w.set_t1_enabled() {
-            enable_ch(cq, Channel::FChannel(FChannel::Temperature1));
+            enable_ch(cmd_caller, Channel::FChannel(FChannel::Temperature1))?;
         }
 
         if !ws.T2_enabled & w.set_t2_enabled() {
-            enable_ch(cq, Channel::FChannel(FChannel::Temperature2));
+            enable_ch(cmd_caller, Channel::FChannel(FChannel::Temperature2))?;
         }
 
         if !ws.TCPUEnabled & w.set_tcpu_enabled() {
-            enable_ch(cq, Channel::AChannel(AChannel::TCPU));
+            enable_ch(cmd_caller, Channel::AChannel(AChannel::TCPU))?;
         }
 
         if !ws.VBatEnabled & w.set_v_bat_enable() {
-            enable_ch(cq, Channel::AChannel(AChannel::Vbat));
+            enable_ch(cmd_caller, Channel::AChannel(AChannel::Vbat))?;
         }
 
         //---------------------------------------------------------------------

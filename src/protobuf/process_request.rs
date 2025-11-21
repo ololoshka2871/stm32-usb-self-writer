@@ -1,15 +1,17 @@
-use alloc::sync::Arc;
-use freertos_rust::{FreeRtosError, Mutex};
+use core::fmt::Debug;
 
-use crate::{settings::start_writing_settings, workmodes::output_storage::OutputStorage};
+use crate::settings::start_writing_settings;
 
 const PROTOCOL_VERSION: u32 = super::messages::Info::ProtocolVersion as u32;
 
-pub fn process_requiest(
+pub fn process_request<E>(
     req: super::messages::Request,
     mut resp: super::messages::Response,
-    output: &Arc<Mutex<OutputStorage>>,
-    cq: &freertos_rust::Queue<crate::threads::sensor_processor::Command>,
+    output_provider: impl corelogic::output_provider::OutputProvider<
+        Output = crate::workmodes::output_storage::OutputStorage,
+        Error = E,
+    >,
+    cmd_caller: impl Fn(crate::threads::sensor_processor::Command) -> Result<(), ()>,
 ) -> Result<super::messages::Response, ()> {
     if !(req.device_id == super::messages::Info::PressureSelfWriterId as u32
         || req.device_id == super::messages::Info::IdDiscover as u32)
@@ -30,10 +32,10 @@ pub fn process_requiest(
     }
 
     if let Some(write_settings) = req.write_settings {
-        match super::process_settings::update_settings(&write_settings, cq) {
+        match super::process_settings::update_settings(&write_settings, &cmd_caller) {
             Ok(need_to_write) => {
                 if let Err(e) = start_writing_settings(need_to_write) {
-                    free_rtos_settings_error(e);
+                    print_settings_error(e);
                     resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
                 }
             }
@@ -49,7 +51,7 @@ pub fn process_requiest(
 
     if req.get_info.is_some() {
         let mut info = super::messages::InfoResponse::default();
-        if let Err(_) = super::device_info::fill_info(&mut info, output) {
+        if let Err(_) = super::device_info::fill_info(&mut info, &output_provider) {
             resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
         }
         resp.info = Some(info);
@@ -65,7 +67,7 @@ pub fn process_requiest(
                 }
                 Ok(need_save) => {
                     if let Err(e) = start_writing_settings(need_save) {
-                        free_rtos_settings_error(e);
+                        print_settings_error(e);
                         resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
                         false
                     } else {
@@ -111,7 +113,7 @@ pub fn process_requiest(
 
     if let Some(get_output_values) = req.get_output_values {
         let mut out = super::messages::OutputResponse::default();
-        if let Err(_) = super::output::fill_output(&mut out, &get_output_values, output) {
+        if let Err(_) = super::output::fill_output(&mut out, &get_output_values, &output_provider) {
             resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
         }
         resp.output = Some(out);
@@ -137,6 +139,6 @@ fn fill_flash_state(
     Ok(())
 }
 
-fn free_rtos_settings_error(e: FreeRtosError) {
+fn print_settings_error<E: Debug>(e: E) {
     defmt::error!("Failed to store settings: {}", defmt::Debug2Format(&e));
 }
