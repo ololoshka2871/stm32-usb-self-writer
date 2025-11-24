@@ -54,7 +54,7 @@ impl RawValueProcessor for HighPerformanceProcessor {
                 match ch {
                     FChannel::Pressure => super::calc_pressure(
                         f,
-                        o.values[crate::config::TEMP_CHANNEL_FOR_P_CORRECTION as usize],
+                        o.values[crate::config::P_CORRECTION_T_CHANNEL as usize],
                         o,
                     ),
                     ch => super::calc_temperature(f, ch, o),

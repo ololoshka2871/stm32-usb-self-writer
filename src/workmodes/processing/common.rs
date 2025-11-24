@@ -127,11 +127,7 @@ pub fn calc_pressure(fp: f64, ft: Option<f64>, output: &mut OutputStorage) {
             fp,
             ft,
             &ws.P_Coefficients,
-            match crate::config::TEMP_CHANNEL_FOR_P_CORRECTION {
-                FChannel::Temperature1 => ws.T_enabled[0],
-                FChannel::Temperature2 => ws.T_enabled[1],
-                _ => panic!("calc_pressure called for non-temperature channel"),
-            },
+            ws.T_enabled[crate::config::INDEPENDENT_T_CHANNEL as usize - 1],
         );
 
         let overpress =

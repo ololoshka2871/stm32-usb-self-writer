@@ -98,7 +98,10 @@ pub const F_CH_START_COUNT: u32 = 2;
 pub const GEN_COLD_STARTUP_TIME_MS: u32 = 200;
 
 // Канал темепературы который используется для коррекции давления
-pub const TEMP_CHANNEL_FOR_P_CORRECTION: FChannel = FChannel::Temperature2;
+pub const P_CORRECTION_T_CHANNEL: FChannel = FChannel::Temperature2;
+
+// независимый канал температуры
+pub const INDEPENDENT_T_CHANNEL: FChannel = FChannel::Temperature1;
 
 //-----------------------------------------------------------------------------
 

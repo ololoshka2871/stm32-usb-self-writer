@@ -65,11 +65,10 @@ impl RecorderProcessor {
                         .to_ms()
                 };
 
-                let (t_correction_en, t_en) = match crate::config::TEMP_CHANNEL_FOR_P_CORRECTION {
-                    FChannel::Temperature1 => (ws.T_enabled[0], ws.T_enabled[1]),
-                    FChannel::Temperature2 => (ws.T_enabled[1], ws.T_enabled[0]),
-                    _ => panic!("TEMP_CHANNEL_FOR_P_CORRECTION is set to non-temperature channel"),
-                };
+                let (t_correction_en, t_en) = (
+                    ws.T_enabled[crate::config::P_CORRECTION_T_CHANNEL as usize - 1],
+                    ws.T_enabled[crate::config::INDEPENDENT_T_CHANNEL as usize - 1],
+                );
 
                 Ok(FChCfg {
                     p_preheat_time_ms: preheat_time_ms(ws.PMesureTime_ms),
@@ -292,15 +291,24 @@ impl RecorderProcessor {
             let _ = commad_queue.send(cmd, Duration::infinite());
         };
 
-        let enable_p_channel = |enabled| {
-            if enabled {
+        let enable_p_channel = |p_enabled, tp_enabbled| {
+            if p_enabled {
                 send_cc(Command::Start(Channel::FChannel(FChannel::Pressure), 0));
+            }
+            if tp_enabbled {
+                send_cc(Command::Start(
+                    Channel::FChannel(crate::config::P_CORRECTION_T_CHANNEL),
+                    0,
+                ));
             }
         };
 
-        let enable_t_channel = |ch, enabled| {
+        let enable_t_channel = |enabled| {
             if enabled {
-                send_cc(Command::Start(Channel::FChannel(ch), 0));
+                send_cc(Command::Start(
+                    Channel::FChannel(crate::config::INDEPENDENT_T_CHANNEL),
+                    0,
+                ));
             }
         };
 
@@ -327,12 +335,12 @@ impl RecorderProcessor {
                     match c {
                         FChannel::Pressure => super::calc_pressure(
                             f,
-                            o.values[crate::config::TEMP_CHANNEL_FOR_P_CORRECTION as usize],
+                            o.frequencys[crate::config::P_CORRECTION_T_CHANNEL as usize],
                             o,
                         ),
                         c => {
                             // не будем считать температуру если это канал компенсации давления
-                            if c != crate::config::TEMP_CHANNEL_FOR_P_CORRECTION {
+                            if c != crate::config::P_CORRECTION_T_CHANNEL {
                                 super::calc_temperature(f, c, o);
                             }
                         }
@@ -392,10 +400,10 @@ impl RecorderProcessor {
                 CurrentTask::delay(Duration::ms(
                     ch_cfg.t_preheat_time_ms - ch_cfg.p_preheat_time_ms,
                 ));
-                enable_p_channel(ch_cfg.p_en);
+                enable_p_channel(ch_cfg.p_en, ch_cfg.t_correction_en);
                 CurrentTask::delay(Duration::ms(ch_cfg.p_preheat_time_ms));
             } else {
-                enable_p_channel(ch_cfg.p_en);
+                enable_p_channel(ch_cfg.p_en, ch_cfg.t_correction_en);
                 CurrentTask::delay(Duration::ms(
                     ch_cfg.p_preheat_time_ms - ch_cfg.t_preheat_time_ms,
                 ));
@@ -403,7 +411,7 @@ impl RecorderProcessor {
                 CurrentTask::delay(Duration::ms(ch_cfg.t_preheat_time_ms));
             }
         } else {
-            enable_p_channel(ch_cfg.p_en);
+            enable_p_channel(ch_cfg.p_en, ch_cfg.t_correction_en);
             enable_t_channel(ch_cfg.t_en);
             // 2 - по тому, что каналы включаются синхронно (там delay)
             CurrentTask::delay(Duration::ms(2 * ch_cfg.p_preheat_time_ms));
@@ -499,8 +507,12 @@ impl RecorderProcessor {
                     enable_t_channel(ch_cfg.t_en);
                     break;
                 }
-                if process_sensor_event(&mut to_t_write_, &mut page, FChannel::Temperature1) {
-                    enable_p_channel(ch_cfg.p_en);
+                if process_sensor_event(
+                    &mut to_t_write_,
+                    &mut page,
+                    crate::config::INDEPENDENT_T_CHANNEL,
+                ) {
+                    enable_p_channel(ch_cfg.p_en, ch_cfg.t_correction_en);
                     break;
                 }
                 let end_moment = freertos_rust::FreeRtosUtils::get_tick_count();
