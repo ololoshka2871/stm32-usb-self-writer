@@ -6,30 +6,21 @@ on:
       - master
       - "*/*"
 
-# Caching proxy
-env:
-  http_proxy: ${{ vars.HTTP_PROXY }} 
-  https_proxy: ${{ vars.HTTP_PROXY }} 
-
 jobs:
   build:
-    runs-on: rust-stm32
+    runs-on: rust-stm32-r194
     steps:
-      - name: Install root certificate
-        run: |
-          mkdir -p /usr/share/ca-certificates/extra
-          echo "${{ vars.SCTB_ROOT_CERT }}" > /usr/share/ca-certificates/extra/sctb.crt
-          echo "extra/sctb.crt" >> /etc/ca-certificates.conf
-          update-ca-certificates
+      - name: Install SCTB Elpa certificate
+        uses: https://gitea.sctbelpa/Public/git-action-ca-certificate-import@v2
+        with:
+          certificate: ${{ vars.SCTB_ROOT_CERT }}
+          certificate-name: "sctb.crt"
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-      
       - name: Clone
-        uses: actions/checkout@v4
+        uses: https://gitea.sctbelpa/Public/checkout@v4
         with:
           submodules: recursive
-      
+
       - name: install crates.io mirror
         run: |
           mkdir -p .cargo/
@@ -37,8 +28,5 @@ jobs:
           cat .cargo/config.toml
 
       - name: Build
-        env:
-          http_proxy: ""
-          https_proxy: ""
         run: |
           cargo build --release

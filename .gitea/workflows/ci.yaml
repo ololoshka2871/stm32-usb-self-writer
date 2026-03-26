@@ -1,32 +1,26 @@
 name: Build
 
-on: 
+on:
   push:
     tags:
       - v*
 
 # Caching proxy
 env:
-  http_proxy: ${{ vars.HTTP_PROXY }} 
-  https_proxy: ${{ vars.HTTP_PROXY }} 
   NODE_TLS_REJECT_UNAUTHORIZED: 0
 
 jobs:
   build:
-    runs-on: rust-stm32
+    runs-on: rust-stm32-r194
     steps:
-      - name: Install root certificate
-        run: |
-          mkdir -p /usr/share/ca-certificates/extra
-          echo "${{ vars.SCTB_ROOT_CERT }}" > /usr/share/ca-certificates/extra/sctb.crt
-          echo "extra/sctb.crt" >> /etc/ca-certificates.conf
-          update-ca-certificates
-
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+      - name: Install SCTB Elpa certificate
+        uses: https://gitea.sctbelpa/Public/git-action-ca-certificate-import@v2
+        with:
+          certificate: ${{ vars.SCTB_ROOT_CERT }}
+          certificate-name: "sctb.crt"
 
       - name: Clone
-        uses: actions/checkout@v4
+        uses: https://gitea.sctbelpa/Public/checkout@v4
         with:
           submodules: recursive
 
@@ -37,25 +31,24 @@ jobs:
           cat .cargo/config.toml
 
       - name: Build
-        env:
-          http_proxy: ""
-          https_proxy: ""
         run: cargo build --release
 
       - name: Create binary dist
-        run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/stm32-usb-self-writer stm32-usb-self-writer.bin
+        run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer self-writer.bin
 
-      - uses: SebRollen/toml-action@v1.2.0
+      - name: Read version from Cargo.toml
+        uses: https://gitea.sctbelpa/Public/toml-action@v1.2.0
         id: read_version
         with:
-          file: 'Cargo.toml'
-          field: 'package.version'
+          file: "Cargo.toml"
+          field: "package.version"
 
-      - uses: akkuman/gitea-release-action@v1
+      - name: Create release
+        uses: https://gitea.sctbelpa/Public/gitea-release-action@v1
         with:
           name: v${{ steps.read_version.outputs.value }}
           body: |
             This is an automatic ${{ steps.read_version.outputs.value }} release!
           prerelease: true
           files: |
-            stm32-usb-self-writer.bin
+            self-writer.bin
