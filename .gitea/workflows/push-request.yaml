@@ -27,6 +27,14 @@ jobs:
           echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
           cat .cargo/config.toml
 
-      - name: Build
+      - name: Build 24MHz xtal version
         run: |
-          cargo build --release
+          cargo build --release --features "xtal-24mhz"
+
+      - name: Build 12MHz xtal version
+        run: |
+          cargo build --release --features "xtal-12mhz"
+
+      - name: Build no-flash version
+        run: |
+          cargo build --release --features "xtal-24mhz,no-flash"

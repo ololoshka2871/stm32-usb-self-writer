@@ -95,6 +95,7 @@ freqmeter-start-stop = []
 led-blink = []
 led-blink-each-block = ["led-blink"]
 flash-sleep = []
+
 no-flash = [] # only for debug 
 force-defmt-logs = [] # early enable defmt logs via enable dma controller
 maket = [] # QSPI_BK1 -> PE12
