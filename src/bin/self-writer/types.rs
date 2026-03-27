@@ -1,0 +1,89 @@
+#[allow(unused_imports)]
+use stm32l4xx_hal::gpio::{
+    Alternate, Output, PushPull, PA2, PA3, PA6, PA7, PB0, PB1, PC10, PD11, PE12,
+};
+use stm32l4xx_hal::gpio::{Analog, PA0, PA1, PA8, PD10, PD13};
+
+use stm32_usb_self_writer::{
+    config,
+    workmodes::{
+        high_performance_mode::{HighPerformanceClockConfigProvider, PllConfigProvider},
+        recorder_mode::RecorderClockConfigProvider,
+    },
+};
+
+//-----------------------------------------------------------------------------
+
+pub struct Pll;
+
+#[cfg(feature = "xtal-24mhz")]
+impl PllConfigProvider for Pll {
+    const PD: u32 = 3;
+    const M: u32 = 20;
+    const AD: u32 = 2;
+
+    const SAI_MUL: u32 = 12;
+    const SAI_DIV_CODE: u32 = 2;
+}
+
+#[cfg(feature = "xtal-12mhz")]
+impl PllConfigProvider for Pll {
+    const PD: u32 = 3;
+    const M: u32 = 40;
+    const AD: u32 = 2;
+
+    const SAI_MUL: u32 = 24;
+    const SAI_DIV_CODE: u32 = 2;
+}
+
+pub type HighPerformanceClockProvider = HighPerformanceClockConfigProvider<
+    Pll,
+    { config::XTAL_FREQ },
+    { config::SELF_WRITER_CPU_FREQ },
+>;
+pub type RecorderClockProvider =
+    RecorderClockConfigProvider<{ config::XTAL_FREQ }, { config::SELF_WRITER_CPU_FREQ }>;
+
+//-----------------------------------------------------------------------------
+
+#[cfg(feature = "no-flash")]
+pub type Flash1 = ();
+#[cfg(feature = "no-flash")]
+pub type FlashResetPin = ();
+
+#[cfg(feature = "maket")]
+pub type Flash1Io1 = PE12<Alternate<PushPull, 10>>;
+#[cfg(not(feature = "maket"))]
+pub type Flash1Io1 = PB1<Alternate<PushPull, 10>>;
+
+#[cfg(not(feature = "no-flash"))]
+pub type Flash1 = qspi_stm32lx3::qspi::Qspi<(
+    PA3<Alternate<PushPull, 10>>,
+    PA2<Alternate<PushPull, 10>>,
+    Flash1Io1,
+    PB0<Alternate<PushPull, 10>>,
+    PA7<Alternate<PushPull, 10>>,
+    PA6<Alternate<PushPull, 10>>,
+)>;
+// TODO: add support 2 channels
+//#[cfg(not(feature = "no-flash"))]
+//pub type Flash2 = qspi_stm32lx3::qspi::Qspi<(
+//    PA3<Alternate<PushPull, 10>>,
+//    PD3<Alternate<PushPull, 10>>,
+//    PD4<Alternate<PushPull, 10>>,
+//    PD5<Alternate<PushPull, 10>>,
+//    PD6<Alternate<PushPull, 10>>,
+//    PD7<Alternate<PushPull, 10>>,
+//)>;
+#[cfg(not(feature = "no-flash"))]
+pub type FlashResetPin = PD11<Output<PushPull>>;
+
+pub type Led = PC10<Output<PushPull>>;
+
+//-----------------------------------------------------------------------------
+
+pub type VBatPin = PA1<Analog>;
+pub type InPPin = PA8<Alternate<PushPull, 1>>;
+pub type InTPin = PA0<Alternate<PushPull, 1>>;
+pub type EnPPin = PD13<Output<PushPull>>;
+pub type EnTPin = PD10<Output<PushPull>>;

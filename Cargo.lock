@@ -70,9 +70,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
 name = "bitmask"
@@ -1053,7 +1053,7 @@ version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd15f8a2c5551a84d56efdc1cd049089e409ac19a3072d5037a17fd70719ff3e"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -1214,6 +1214,7 @@ dependencies = [
  "stm32-usbd",
  "stm32l4xx-hal",
  "strum",
+ "umm-malloc",
  "usb-device",
  "usbd-serial",
  "usbd_mass_storage",
@@ -1351,6 +1352,24 @@ source = "git+https://github.com/ololoshka2871/stm32-usb.rs.git?rev=9f80627#9f80
 dependencies = [
  "bitmask",
  "packing",
+]
+
+[[package]]
+name = "umm-malloc"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53a2169d70183aca6cccf060ed962551dfae3d10d8b80e3e976e4d0c11a6e6d8"
+dependencies = [
+ "umm-malloc-sys",
+]
+
+[[package]]
+name = "umm-malloc-sys"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b34bf1573983529135d8cdbfbacc352987ca7300fc371bcbcb14cbd5ef3b81ce"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

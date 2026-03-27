@@ -15,6 +15,8 @@ pub const SYST_TIMER_HZ_HIGH_FREQ_MODE: u32 = 1_000;
 
 //-----------------------------------------------------------------------------
 
+pub const HEAP_SIZE: usize = 1024 * 2;
+
 // see: src/config/FreeRTOSConfig.h: configMAX_SYSCALL_INTERRUPT_PRIORITY
 // value + -> prio -
 pub const IRQ_HIGEST_PRIO: u8 = 80;
