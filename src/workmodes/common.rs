@@ -29,6 +29,12 @@ pub trait ClockConfigProvider {
     fn master_counter_frequency() -> Hertz;
     fn pll_config() -> PllConfig;
     fn xtal2master_freq_multiplier() -> f64;
+
+    fn configure_clocks(
+        flash: &mut stm32l4xx_hal::flash::Parts,
+        rcc: &mut stm32l4xx_hal::rcc::Rcc,
+        pwr: &mut stm32l4xx_hal::pwr::Pwr,
+    ) -> stm32l4xx_hal::rcc::Clocks;
 }
 
 #[derive(Default)]
@@ -57,7 +63,7 @@ impl defmt::Format for Ticks {
 }
 
 pub fn to_real_period<D: DurationTicks, F: Into<Hertz>>(period: D, sysclk: F) -> Duration {
-    let in_freq_hz = Hertz(crate::config::FREERTOS_CONFIG_FREQ);
+    let in_freq_hz = Hertz(crate::config::SELF_WRITER_CPU_FREQ);
     let fcpu_hz: Hertz = sysclk.into();
 
     let ticks = period.to_ticks() as u64 * fcpu_hz.0 as u64 / in_freq_hz.0 as u64;
@@ -66,7 +72,7 @@ pub fn to_real_period<D: DurationTicks, F: Into<Hertz>>(period: D, sysclk: F) ->
 }
 
 pub fn from_real_period<F: Into<Hertz>>(period: u32, sysclk: F) -> Duration {
-    let in_freq_hz = Hertz(crate::config::FREERTOS_CONFIG_FREQ);
+    let in_freq_hz = Hertz(crate::config::SELF_WRITER_CPU_FREQ);
     let fcpu_hz: Hertz = sysclk.into();
 
     let ticks = period as u64 * in_freq_hz.0 as u64 / fcpu_hz.0 as u64;

@@ -67,6 +67,12 @@ fn main() {
         panic!("Debug builds are not allowed, use release builds!");
     }
 
+    #[cfg(all(feature = "xtal-12mhz", feature = "xtal-24mhz"))]
+    panic!("Multiple xtal frequency features enabled, choose only one!");
+
+    #[cfg(not(any(feature = "xtal-12mhz", feature = "xtal-24mhz")))]
+    panic!("No xtal frequency feature enabled, choose one!");
+
     gen_protobuf();
-    build_freertos(freertos_cargo_build::Builder::new());
+    //build_freertos(freertos_cargo_build::Builder::new());
 }

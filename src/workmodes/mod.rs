@@ -4,7 +4,7 @@ use freertos_rust::{FreeRtosError, Mutex};
 pub mod high_performance_mode;
 pub mod recorder_mode;
 
-pub(crate) mod common;
+pub mod common;
 //mod my_clock_freeze;
 
 pub mod output_storage;

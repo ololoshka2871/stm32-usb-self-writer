@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use alloc::sync::Arc;
 use freertos_rust::{Duration, Mutex, Queue, Task, TaskPriority};
 
@@ -22,53 +24,6 @@ use crate::threads::sensor_processor::Command;
 use crate::workmodes::{common::ClockConfigProvider, processing::HighPerformanceProcessor};
 
 use super::{output_storage::OutputStorage, WorkMode};
-
-// /PD *M /AD
-const PLL_CFG: (u32, u32, u32) = (6, 40, 2); // (3, 40, 2) = 80 Mhz
-const APB1_DEVIDER: u32 = 1; // USB max performance
-const APB2_DEVIDER: u32 = 8;
-
-struct HighPerformanceClockConfigProvider;
-
-impl ClockConfigProvider for HighPerformanceClockConfigProvider {
-    fn core_frequency() -> Hertz {
-        let f = crate::config::XTAL_FREQ * PLL_CFG.1 / (PLL_CFG.0 * PLL_CFG.2);
-        Hertz(f)
-    }
-
-    fn apb1_frequency() -> Hertz {
-        Hertz(Self::core_frequency().0 / APB1_DEVIDER)
-    }
-
-    fn apb2_frequency() -> Hertz {
-        Hertz(Self::core_frequency().0 / APB2_DEVIDER)
-    }
-
-    // stm32_cube: if APB devider > 1, timers freq APB*2
-    fn master_counter_frequency() -> Hertz {
-        if APB1_DEVIDER > 1 {
-            Hertz(Self::apb1_frequency().0 * 2)
-        } else {
-            Self::apb1_frequency()
-        }
-    }
-
-    fn pll_config() -> PllConfig {
-        PllConfig::new(
-            PLL_CFG.0 as u8,
-            PLL_CFG.1 as u8,
-            super::common::to_pll_devider(PLL_CFG.2),
-        )
-    }
-
-    fn xtal2master_freq_multiplier() -> f64 {
-        if APB1_DEVIDER > 1 {
-            PLL_CFG.1 as f64 / (PLL_CFG.0 * PLL_CFG.2) as f64 / APB1_DEVIDER as f64 * 2.0
-        } else {
-            PLL_CFG.1 as f64 / (PLL_CFG.0 * PLL_CFG.2) as f64
-        }
-    }
-}
 
 #[allow(unused)]
 pub struct HighPerformanceMode {
@@ -249,73 +204,19 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
     // Установить частоту CPU = 80 MHz (12 / 3 * 40 / 2 == 80)
     // USB работает от PLLSAI1Q = 48 MHz (12 / 3 * 24 / 2 == 48)
     fn configure_clock(&mut self) {
-        fn configure_usb48() {
-            let _rcc = unsafe { &*stm32::RCC::ptr() };
-
-            // set USB 48Mhz clock src to PLLSAI1Q
-            // mast be configured only before PLL enable
-
-            _rcc.cr.modify(|_, w| w.pllsai1on().clear_bit());
-            while _rcc.cr.read().pllsai1rdy().bit_is_set() {}
-
-            _rcc.pllsai1cfgr.modify(|_, w| unsafe {
-                w.pllsai1n()
-                    .bits(24) // * 24
-                    .pllsai1q()
-                    .bits(0b00) // /2
-                    .pllsai1qen()
-                    .set_bit() // enable PLLSAI1Q
-            });
-
-            _rcc.cr.modify(|_, w| w.pllsai1on().set_bit());
-            while _rcc.cr.read().pllsai1rdy().bit_is_set() {}
-
-            // PLLSAI1Q -> CLK48MHz
-            unsafe { _rcc.ccipr.modify(|_, w| w.clk48sel().bits(0b01)) };
-        }
-
-        fn setup_cfgr(work_cfgr: &mut stm32l4xx_hal::rcc::CFGR) {
-            let mut cfgr = unsafe {
-                core::mem::MaybeUninit::<stm32l4xx_hal::rcc::CFGR>::zeroed().assume_init()
-            };
-
-            core::mem::swap(&mut cfgr, work_cfgr);
-
-            let mut cfgr = cfgr
-                .hsi48(false)
-                .hse(
-                    Hertz(crate::config::XTAL_FREQ), // onboard crystall
-                    stm32l4xx_hal::rcc::CrystalBypass::Disable,
-                    stm32l4xx_hal::rcc::ClockSecuritySystem::Enable,
-                )
-                .sysclk_with_pll(
-                    HighPerformanceClockConfigProvider::core_frequency(),
-                    HighPerformanceClockConfigProvider::pll_config(),
-                )
-                .pll_source(stm32l4xx_hal::rcc::PllSource::HSE)
-                .pclk1(HighPerformanceClockConfigProvider::apb1_frequency())
-                .pclk2(HighPerformanceClockConfigProvider::apb2_frequency());
-
-            core::mem::swap(&mut cfgr, work_cfgr);
-        }
-
-        setup_cfgr(&mut self.rcc.cfgr);
-
-        let clocks = if let Ok(mut flash) = self.flash.lock(Duration::infinite()) {
-            self.rcc.cfgr.freeze(&mut flash.acr, &mut self.pwr)
-        } else {
-            panic!()
-        };
-
-        configure_usb48();
-
-        // stm32l433cc.pdf: figure. 4
-        master_counter::MasterCounter::init(
-            HighPerformanceClockConfigProvider::master_counter_frequency(),
-            self.interrupt_controller.clone(),
-        );
-
-        self.clocks = Some(clocks);
+        //let clocks = if let Ok(mut flash) = self.flash.lock(Duration::infinite()) {
+        //    clocks_high_performance_mode(&mut self.rcc, &mut flash, &mut self.pwr)
+        //} else {
+        //    panic!()
+        //};
+        //
+        //// stm32l433cc.pdf: figure. 4
+        //master_counter::MasterCounter::init(
+        //    HighPerformanceClockConfigProvider::master_counter_frequency(),
+        //    self.interrupt_controller.clone(),
+        //);
+        //
+        //self.clocks = Some(clocks);
     }
 
     fn start_threads(mut self) -> Result<(), freertos_rust::FreeRtosError> {
@@ -400,18 +301,18 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             };
             let cq = self.sensor_command_queue.clone();
             let ic = self.interrupt_controller.clone();
-            let processor = HighPerformanceProcessor::new(
-                self.output.clone(),
-                HighPerformanceClockConfigProvider::xtal2master_freq_multiplier(),
-                sys_clk,
-            );
-            Task::new()
-                .name("SensProc")
-                .stack_size(1024)
-                .priority(TaskPriority(crate::config::SENS_PROC_TASK_PRIO))
-                .start(move |_| {
-                    threads::sensor_processor::sensor_processor(sp, cq, ic, processor, sys_clk)
-                })?;
+            //let processor = HighPerformanceProcessor::new(
+            //    self.output.clone(),
+            //    HighPerformanceClockConfigProvider::xtal2master_freq_multiplier(),
+            //    sys_clk,
+            //);
+            //Task::new()
+            //    .name("SensProc")
+            //    .stack_size(1024)
+            //    .priority(TaskPriority(crate::config::SENS_PROC_TASK_PRIO))
+            //    .start(move |_| {
+            //        threads::sensor_processor::sensor_processor(sp, cq, ic, processor, sys_clk)
+            //    })?;
         }
         // --------------------------------------------------------------------
 
@@ -462,4 +363,135 @@ pub fn enable_selected_channels(cq: &Queue<Command>) {
         },
     )
     .map_err(|e| panic!("Failed to read channel enable: {:?}", e));
+}
+
+pub trait PllConfigProvider {
+    const PD: u32;
+    const M: u32;
+    const AD: u32;
+
+    const SAI_MUL: u32;
+    const SAI_DIV_CODE: u32;
+}
+
+pub struct HighPerformanceClockConfigProvider<
+    PLL: PllConfigProvider,
+    const XTAL_FREQ: u32,
+    const CPU_FREQ: u32,
+    const APB1_DEVIDER: u32 = 1,
+    const APB2_DEVIDER: u32 = 8,
+>(PhantomData<PLL>);
+
+impl<
+        PLL: PllConfigProvider,
+        const XTAL_FREQ: u32,
+        const CPU_FREQ: u32,
+        const APB1_DEVIDER: u32,
+        const APB2_DEVIDER: u32,
+    > ClockConfigProvider
+    for HighPerformanceClockConfigProvider<PLL, XTAL_FREQ, CPU_FREQ, APB1_DEVIDER, APB2_DEVIDER>
+{
+    fn core_frequency() -> Hertz {
+        let f = XTAL_FREQ * PLL::M / (PLL::PD * PLL::AD);
+        Hertz(f)
+    }
+
+    fn apb1_frequency() -> Hertz {
+        Hertz(Self::core_frequency().0 / APB1_DEVIDER)
+    }
+
+    fn apb2_frequency() -> Hertz {
+        Hertz(Self::core_frequency().0 / APB2_DEVIDER)
+    }
+
+    // stm32_cube: if APB devider > 1, timers freq APB*2
+    fn master_counter_frequency() -> Hertz {
+        if APB1_DEVIDER > 1 {
+            Hertz(Self::core_frequency().0 / APB1_DEVIDER * 2)
+        } else {
+            Hertz(Self::core_frequency().0 / APB1_DEVIDER)
+        }
+    }
+
+    fn pll_config() -> PllConfig {
+        PllConfig::new(
+            PLL::PD as u8,
+            PLL::M as u8,
+            super::common::to_pll_devider(PLL::AD),
+        )
+    }
+
+    fn xtal2master_freq_multiplier() -> f64 {
+        if APB1_DEVIDER > 1 {
+            Self::core_frequency().0 as f64 / APB1_DEVIDER as f64 * 2.0
+        } else {
+            Self::core_frequency().0 as f64
+        }
+    }
+
+    fn configure_clocks(
+        flash: &mut stm32l4xx_hal::flash::Parts,
+        rcc: &mut stm32l4xx_hal::rcc::Rcc,
+        pwr: &mut stm32l4xx_hal::pwr::Pwr,
+    ) -> stm32l4xx_hal::rcc::Clocks {
+        fn configure_usb48(sai_mul: u8, sai_div: u8) {
+            // set USB 48Mhz clock src to PLLSAI1Q
+            // mast be configured only before PLL enable
+            let rcc = unsafe { &*stm32::RCC::ptr() };
+
+            rcc.cr.modify(|_, w| w.pllsai1on().clear_bit());
+            while rcc.cr.read().pllsai1rdy().bit_is_set() {}
+
+            rcc.pllsai1cfgr.modify(|_, w| unsafe {
+                w.pllsai1n()
+                    .bits(sai_mul)
+                    .pllsai1q()
+                    .bits(sai_div)
+                    .pllsai1qen()
+                    .set_bit() // enable PLLSAI1Q
+            });
+
+            rcc.cr.modify(|_, w| w.pllsai1on().set_bit());
+            while rcc.cr.read().pllsai1rdy().bit_is_set() {}
+
+            // PLLSAI1Q -> CLK48MHz
+            unsafe { rcc.ccipr.modify(|_, w| w.clk48sel().bits(0b01)) };
+        }
+
+        {
+            let work_cfgr: &mut stm32l4xx_hal::rcc::CFGR = &mut rcc.cfgr;
+            let mut cfgr = unsafe {
+                core::mem::MaybeUninit::<stm32l4xx_hal::rcc::CFGR>::zeroed().assume_init()
+            };
+
+            core::mem::swap(&mut cfgr, work_cfgr);
+
+            let mut cfgr = cfgr
+                .hsi48(false)
+                .hse(
+                    Hertz(XTAL_FREQ), // onboard crystall
+                    stm32l4xx_hal::rcc::CrystalBypass::Disable,
+                    stm32l4xx_hal::rcc::ClockSecuritySystem::Enable,
+                )
+                .sysclk_with_pll(
+                    Self::core_frequency(),
+                    PllConfig::new(
+                        PLL::PD as u8,
+                        PLL::M as u8,
+                        crate::workmodes::common::to_pll_devider(PLL::AD),
+                    ),
+                )
+                .pll_source(stm32l4xx_hal::rcc::PllSource::HSE)
+                .pclk1(Self::apb1_frequency())
+                .pclk2(Self::apb2_frequency());
+
+            core::mem::swap(&mut cfgr, work_cfgr);
+        };
+
+        let clocks = rcc.cfgr.freeze(&mut flash.acr, pwr);
+
+        configure_usb48(PLL::SAI_MUL as u8, PLL::SAI_DIV_CODE as u8);
+
+        clocks
+    }
 }

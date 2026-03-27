@@ -27,46 +27,6 @@ use crate::{
 
 use super::{common::ClockConfigProvider, output_storage::OutputStorage, WorkMode};
 
-const APB1_DEVIDER: u32 = 1;
-const APB2_DEVIDER: u32 = 1;
-
-struct RecorderClockConfigProvider;
-
-impl ClockConfigProvider for RecorderClockConfigProvider {
-    fn core_frequency() -> Hertz {
-        Hertz(crate::config::FREERTOS_CONFIG_FREQ)
-    }
-
-    fn apb1_frequency() -> Hertz {
-        Hertz(Self::core_frequency().0 / APB1_DEVIDER)
-    }
-
-    fn apb2_frequency() -> Hertz {
-        Hertz(Self::core_frequency().0 / APB2_DEVIDER)
-    }
-
-    // stm32_cube: if APB devider > 1, timers freq APB*2
-    fn master_counter_frequency() -> Hertz {
-        if APB1_DEVIDER > 1 {
-            Hertz(Self::apb1_frequency().0 * 2)
-        } else {
-            Self::apb1_frequency()
-        }
-    }
-
-    fn pll_config() -> PllConfig {
-        unreachable!()
-    }
-
-    fn xtal2master_freq_multiplier() -> f64 {
-        if APB1_DEVIDER > 1 {
-            2.0 / (crate::config::XTAL_FREQ as f64 / crate::config::FREERTOS_CONFIG_FREQ as f64)
-        } else {
-            1.0 / (crate::config::XTAL_FREQ as f64 / crate::config::FREERTOS_CONFIG_FREQ as f64)
-        }
-    }
-}
-
 #[derive(Debug, PartialEq)]
 /// HSE Configuration
 struct HseConfig {
@@ -501,42 +461,24 @@ impl WorkMode<RecorderMode> for RecorderMode {
     // Установить частоту CPU = 12 MHz
     // USB не тактируется
     fn configure_clock(&mut self) {
-        fn setup_cfgr() -> MyCFGR {
-            MyCFGR::new()
-                // TODO: constants
-                .hse(
-                    Hertz(crate::config::XTAL_FREQ), // onboard crystall
-                    stm32l4xx_hal::rcc::CrystalBypass::Disable,
-                    stm32l4xx_hal::rcc::ClockSecuritySystem::Enable,
-                )
-                .sysclk(Hertz(crate::config::XTAL_FREQ))
-                .hclk(RecorderClockConfigProvider::core_frequency())
-                .pclk1(RecorderClockConfigProvider::apb1_frequency())
-                .pclk2(RecorderClockConfigProvider::apb2_frequency())
-        }
-
-        let cfgr = setup_cfgr();
-
-        let clocks = if let Ok(mut flash) = self.flash.lock(Duration::infinite()) {
-            cfgr.freeze(&mut flash.acr, &mut self.pwr)
-        } else {
-            panic!()
-        };
-
-        // low power run (F <= 2MHz) (на 12 MHz выйгрыш около 200мкА)
-        unsafe {
-            (*stm32l4xx_hal::device::PWR::ptr())
-                .cr1
-                .modify(|_, w| w.lpr().set_bit())
-        };
-
-        // stm32l433cc.pdf: fugure. 4
-        master_counter::MasterCounter::init(
-            RecorderClockConfigProvider::master_counter_frequency(),
-            self.interrupt_controller.clone(),
-        );
-
-        self.clocks = Some(clocks);
+        //let clocks = if let Ok(mut flash) = self.flash.lock(Duration::infinite()) {
+        //    clocks_recorder_mode(
+        //        &mut self.rcc,
+        //        &mut flash,
+        //        &mut self.pwr,
+        //        crate::config::XTAL_FREQ,
+        //    )
+        //} else {
+        //    panic!()
+        //};
+        //
+        //// stm32l433cc.pdf: fugure. 4
+        //master_counter::MasterCounter::init(
+        //    RecorderClockConfigProvider::master_counter_frequency(),
+        //    self.interrupt_controller.clone(),
+        //);
+        //
+        //self.clocks = Some(clocks);
     }
 
     fn start_threads(mut self) -> Result<(), freertos_rust::FreeRtosError> {
@@ -597,29 +539,29 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 };
                 let cq = self.sensor_command_queue.clone();
                 let ic = self.interrupt_controller.clone();
-                let mut processor = RecorderProcessor::new(
-                    output.clone(),
-                    self.sensor_command_queue.clone(),
-                    RecorderClockConfigProvider::xtal2master_freq_multiplier(),
-                    sys_clk,
-                );
+                //let mut processor = RecorderProcessor::new(
+                //    output.clone(),
+                //    self.sensor_command_queue.clone(),
+                //    RecorderClockConfigProvider::xtal2master_freq_multiplier(),
+                //    sys_clk,
+                //);
 
-                processor.start(
-                    self.scb,
-                    crate::main_data_storage::diff_writer::FlashDiffWriter::new(
-                        RecorderClockConfigProvider::xtal2master_freq_multiplier() as f32,
-                        self.crc.clone(),
-                    ),
-                    self.led_pin,
-                )?;
+                //processor.start(
+                //    self.scb,
+                //    crate::main_data_storage::diff_writer::FlashDiffWriter::new(
+                //        RecorderClockConfigProvider::xtal2master_freq_multiplier() as f32,
+                //        self.crc.clone(),
+                //    ),
+                //    self.led_pin,
+                //)?;
 
-                Task::new()
-                    .name("SensProc")
-                    .stack_size(1024)
-                    .priority(TaskPriority(crate::config::SENS_PROC_TASK_PRIO))
-                    .start(move |_| {
-                        threads::sensor_processor::sensor_processor(sp, cq, ic, processor, sys_clk)
-                    })?;
+                //Task::new()
+                //    .name("SensProc")
+                //    .stack_size(1024)
+                //    .priority(TaskPriority(crate::config::SENS_PROC_TASK_PRIO))
+                //    .start(move |_| {
+                //        threads::sensor_processor::sensor_processor(sp, cq, ic, processor, sys_clk)
+                //    })?;
             }
         }
         // --------------------------------------------------------------------
@@ -633,5 +575,81 @@ impl WorkMode<RecorderMode> for RecorderMode {
 
     fn print_clock_config(&self) {
         super::common::print_clock_config(&self.clocks, "OFF");
+    }
+}
+
+pub struct RecorderClockConfigProvider<
+    const XTAL_FREQ: u32,
+    const CPU_FREQ: u32,
+    const APB1_DEVIDER: u32 = 1,
+    const APB2_DEVIDER: u32 = 1,
+>;
+
+impl<
+        const XTAL_FREQ: u32,
+        const CPU_FREQ: u32,
+        const APB1_DEVIDER: u32,
+        const APB2_DEVIDER: u32,
+    > ClockConfigProvider
+    for RecorderClockConfigProvider<XTAL_FREQ, CPU_FREQ, APB1_DEVIDER, APB2_DEVIDER>
+{
+    fn core_frequency() -> Hertz {
+        Hertz(CPU_FREQ)
+    }
+
+    fn apb1_frequency() -> Hertz {
+        Hertz(Self::core_frequency().0 / APB1_DEVIDER)
+    }
+
+    fn apb2_frequency() -> Hertz {
+        Hertz(Self::core_frequency().0 / APB2_DEVIDER)
+    }
+
+    // stm32_cube: if APB devider > 1, timers freq APB*2
+    fn master_counter_frequency() -> Hertz {
+        if APB1_DEVIDER > 1 {
+            Hertz(Self::apb1_frequency().0 * 2)
+        } else {
+            Self::apb1_frequency()
+        }
+    }
+
+    fn pll_config() -> PllConfig {
+        unreachable!()
+    }
+
+    fn xtal2master_freq_multiplier() -> f64 {
+        if APB1_DEVIDER > 1 {
+            2.0 / (XTAL_FREQ as f64 / CPU_FREQ as f64)
+        } else {
+            1.0 / (XTAL_FREQ as f64 / CPU_FREQ as f64)
+        }
+    }
+
+    fn configure_clocks(
+        flash: &mut stm32l4xx_hal::flash::Parts,
+        rcc: &mut stm32l4xx_hal::rcc::Rcc,
+        pwr: &mut stm32l4xx_hal::pwr::Pwr,
+    ) -> stm32l4xx_hal::rcc::Clocks {
+        let clocks = MyCFGR::new()
+            .hse(
+                Hertz(XTAL_FREQ),
+                stm32l4xx_hal::rcc::CrystalBypass::Disable,
+                stm32l4xx_hal::rcc::ClockSecuritySystem::Enable,
+            )
+            .sysclk(Hertz(CPU_FREQ))
+            .hclk(Self::core_frequency())
+            .pclk1(Self::apb1_frequency())
+            .pclk2(Self::apb2_frequency())
+            .freeze(&mut flash.acr, pwr);
+
+        // low power run (F <= 2MHz) (на 12 MHz выйгрыш около 200мкА)
+        unsafe {
+            (*stm32l4xx_hal::device::PWR::ptr())
+                .cr1
+                .modify(|_, w| w.lpr().set_bit())
+        };
+
+        clocks
     }
 }

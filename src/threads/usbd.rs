@@ -127,20 +127,20 @@ pub fn usbd(
 // USB exception
 
 // ucCurrentPriority >= ucMaxSysCallPriority (80)
-#[interrupt]
-unsafe fn USB_FS() {
-    let interrupt_ctx = InterruptContext::new();
-    if let Some(usbd) = USBD_THREAD.as_ref() {
-        // Результат не особо важен
-        // инкремент нотификационного значения
-        let _ = usbd.notify_from_isr(&interrupt_ctx, freertos_rust::TaskNotification::Increment);
-    }
-
-    // Как только прерывание случилось, мы посылаем сигнал потоку
-    // НО ивент вызвавший прерыывание пока не снялся, поэтому мы будем
-    // бесконечно в него заходить по кругу, нужно запретить пока что это
-    // прерывание
-    // TODO: device independent layer
-    cortex_m::peripheral::NVIC::mask(Interrupt::USB_FS);
-    cortex_m::peripheral::NVIC::unpend(Interrupt::USB_FS);
-}
+//#[interrupt]
+//unsafe fn USB_FS() {
+//    let interrupt_ctx = InterruptContext::new();
+//    if let Some(usbd) = USBD_THREAD.as_ref() {
+//        // Результат не особо важен
+//        // инкремент нотификационного значения
+//        let _ = usbd.notify_from_isr(&interrupt_ctx, freertos_rust::TaskNotification::Increment);
+//    }
+//
+//    // Как только прерывание случилось, мы посылаем сигнал потоку
+//    // НО ивент вызвавший прерыывание пока не снялся, поэтому мы будем
+//    // бесконечно в него заходить по кругу, нужно запретить пока что это
+//    // прерывание
+//    // TODO: device independent layer
+//    cortex_m::peripheral::NVIC::mask(Interrupt::USB_FS);
+//    cortex_m::peripheral::NVIC::unpend(Interrupt::USB_FS);
+//}

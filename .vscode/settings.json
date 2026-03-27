@@ -2,14 +2,20 @@
     "lldb.displayFormat": "auto",
     "lldb.showDisassembly": "always",
     "lldb.dereferencePointers": true,
-
     // Убрать ошибку Can't find crate for 'test'
     "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
     "rust-analyzer.checkOnSave": false,
     "cortex-debug.variableUseNaturalFormat": false,
     "rust-analyzer.cargo.buildScripts.enable": false,
     "rust-analyzer.cargo.buildScripts.overrideCommand": [
-        "cargo", "check", "--quiet", "--workspace", "--message-format=json",
-        "--all-targets", "--keep-going", "--release"
+        "cargo",
+        "check",
+        "--quiet",
+        "--workspace",
+        "--message-format=json",
+        "--all-targets",
+        "--keep-going",
+        "--release",
+        "--features=xtal-24mhz"
     ],
 }

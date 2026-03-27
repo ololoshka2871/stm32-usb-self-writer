@@ -2,9 +2,16 @@ use stm32l4xx_hal::gpio::PinState;
 
 //-----------------------------------------------------------------------------
 
+#[cfg(feature = "xtal-24mhz")]
 pub const XTAL_FREQ: u32 = 24_000_000;
-pub const FREERTOS_CONFIG_FREQ: u32 = 3_000_000; // Это же число должно быть в src/configTemplate/FreeRTOSConfig.h
+
+#[cfg(feature = "xtal-12mhz")]
+pub const XTAL_FREQ: u32 = 12_000_000;
+
+pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
 pub const HW_VERSION: u32 = 1;
+pub const SYST_TIMER_HZ_SELF_WRITER_MODE: u32 = 100;
+pub const SYST_TIMER_HZ_HIGH_FREQ_MODE: u32 = 1_000; 
 
 //-----------------------------------------------------------------------------
 

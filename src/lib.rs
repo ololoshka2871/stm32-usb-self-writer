@@ -12,8 +12,8 @@ mod sensors;
 mod settings;
 mod support;
 mod threads;
-mod workmodes;
 
+pub mod workmodes;
 pub mod config;
 
 #[cfg(debug_assertions)]
@@ -54,4 +54,43 @@ pub fn is_usb_connected() -> bool {
     let pwr = unsafe { &*stm32::PWR::ptr() };
 
     VUsbMonitor::new(rcc, pwr).is_usb_connected()
+}
+
+//-----------------------------------------------------------------------------
+
+#[no_mangle]
+#[allow(non_snake_case)]
+unsafe extern "C" fn SysTick() {
+    use rtic_monotonics::TimerQueueBackend;
+    rtic_monotonics::systick::SystickBackend::timer_queue().on_monotonic_interrupt();
+}
+
+#[macro_export]
+macro_rules! define_self_writer_monotonic {
+    ($name:ident, $rate_hz:expr) => {
+        pub struct $name;
+
+        impl $name {
+            pub fn start(systick: rtic_monotonics::systick::SYST, sysclk: u32) {
+                rtic_monotonics::systick::SystickBackend::_start(systick, sysclk, $rate_hz);
+            }
+        }
+
+        impl rtic_monotonics::TimerQueueBasedMonotonic for $name {
+            type Backend = rtic_monotonics::systick::SystickBackend;
+            type Instant = rtic_monotonics::fugit::Instant<
+                <Self::Backend as rtic_monotonics::TimerQueueBackend>::Ticks,
+                1,
+                $rate_hz,
+            >;
+            type Duration = rtic_monotonics::fugit::Duration<
+                <Self::Backend as rtic_monotonics::TimerQueueBackend>::Ticks,
+                1,
+                $rate_hz,
+            >;
+        }
+
+        rtic_monotonics::rtic_time::impl_embedded_hal_delay_fugit!($name);
+        rtic_monotonics::rtic_time::impl_embedded_hal_async_delay_fugit!($name);
+    };
 }
