@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "src/config.rs"]
+mod config;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -23,10 +27,12 @@ fn generate_free_rtos_config<P: AsRef<Path>>(path: P) -> PathBuf {
     let cfg = fs::read_to_string(infile.clone())
         .expect(format!("Failed to read {}", infile.to_str().unwrap()).as_str());
 
-    let out_cfg = cfg.replace(
-        "%RUNTIME_STATS%",
-        if cfg!(debug_assertions) { "1" } else { "0" },
-    );
+    let out_cfg = cfg
+        .replace(
+            "%RUNTIME_STATS%",
+            if cfg!(debug_assertions) { "1" } else { "0" },
+        )
+        .replace("%SYS_CLK%", &config::FREERTOS_CONFIG_FREQ.to_string());
 
     let mut out_file = outpath.clone();
     out_file.push(config_file);
@@ -43,14 +49,12 @@ fn build_freertos(mut b: freertos_cargo_build::Builder) {
 
     b.freertos_config(&generate_free_rtos_config("src/configTemplate"));
 
-    /*
     // Location of `FreeRTOSConfig.h`
-    if cfg!(debug_assertions) {
-        b.freertos_config("src/configDebug");
-    } else {
-        b.freertos_config("src/configRelease");
-    }
-    */
+    //if cfg!(debug_assertions) {
+    //    b.freertos_config("src/configDebug");
+    //} else {
+    //    b.freertos_config("src/configRelease");
+    //}
 
     // выбор не работает
     // b.heap(String::from("heap4.c")); // Set the heap_?.c allocator to use from
@@ -66,6 +70,12 @@ fn main() {
     if cfg!(debug_assertions) {
         panic!("Debug builds are not allowed, use release builds!");
     }
+
+    #[cfg(all(feature = "xtal-24mhz", feature = "xtal-12mhz"))]
+    compile_error!("Features 'xtal-24mhz' and 'xtal-12mhz' cannot be enabled at the same time");
+
+    #[cfg(not(any(feature = "xtal-24mhz", feature = "xtal-12mhz")))]
+    compile_error!("Either feature 'xtal-24mhz' or 'xtal-12mhz' must be enabled");
 
     gen_protobuf();
     build_freertos(freertos_cargo_build::Builder::new());

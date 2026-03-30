@@ -1,8 +1,11 @@
-use stm32l4xx_hal::gpio::PinState;
-
 //-----------------------------------------------------------------------------
 
+#[cfg(feature = "xtal-24mhz")]
 pub const XTAL_FREQ: u32 = 24_000_000;
+
+#[cfg(feature = "xtal-12mhz")]
+pub const XTAL_FREQ: u32 = 12_000_000;
+
 pub const FREERTOS_CONFIG_FREQ: u32 = 3_000_000; // Это же число должно быть в src/configTemplate/FreeRTOSConfig.h
 pub const HW_VERSION: u32 = 1;
 
@@ -53,12 +56,12 @@ pub const INITIAL_FREQMETER_TARGET: u32 = 1;
 //-----------------------------------------------------------------------------
 
 // generator enable/disable lvls
-pub const GENERATOR_ENABLE_LVL: PinState = PinState::High;
-pub const GENERATOR_DISABLE_LVL: PinState = PinState::Low;
+pub const GENERATOR_ENABLE_LVL: bool = true;
+pub const GENERATOR_DISABLE_LVL: bool = false;
 
 // Led
-pub const LED_DISABLE: PinState = PinState::High;
-pub const LED_ENABLE: PinState = PinState::Low;
+pub const LED_DISABLE: bool = true;
+pub const LED_ENABLE: bool = false;
 
 //-----------------------------------------------------------------------------
 

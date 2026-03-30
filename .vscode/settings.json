@@ -10,6 +10,6 @@
     "rust-analyzer.cargo.buildScripts.enable": false,
     "rust-analyzer.cargo.buildScripts.overrideCommand": [
         "cargo", "check", "--quiet", "--workspace", "--message-format=json",
-        "--all-targets", "--keep-going", "--release"
+        "--all-targets", "--keep-going", "--release", "--features=xtal-24mhz"
     ],
 }

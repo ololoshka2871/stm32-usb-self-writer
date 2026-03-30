@@ -353,14 +353,7 @@ pub struct RecorderMode {
     vbat_pin: PA1<Analog>,
 
     #[cfg(not(feature = "no-flash"))]
-    qspi: qspi_stm32lx3::qspi::Qspi<(
-        PA3<Alternate<PushPull, 10>>,
-        PA2<Alternate<PushPull, 10>>,
-        PE12<Alternate<PushPull, 10>>,
-        PB0<Alternate<PushPull, 10>>,
-        PA7<Alternate<PushPull, 10>>,
-        PA6<Alternate<PushPull, 10>>,
-    )>,
+    qspi: super::Flash,
     #[cfg(not(feature = "no-flash"))]
     flash_reset_pin: PD11<Output<PushPull>>,
 
@@ -386,7 +379,19 @@ impl WorkMode<RecorderMode> for RecorderMode {
         #[cfg(not(feature = "no-flash"))]
         let (qspi, flash_reset_pin) = {
             let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
+            #[allow(unused)]
             let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
+
+            #[cfg(feature = "maket")]
+            let d0pin =
+                gpioe
+                    .pe12
+                    .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh);
+            #[cfg(not(feature = "maket"))]
+            let d0pin =
+                gpiob
+                    .pb1
+                    .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl);
 
             super::common::create_qspi(
                 (
@@ -396,9 +401,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
                     gpioa
                         .pa2
                         .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-                    gpioe
-                        .pe12
-                        .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
+                    d0pin,
                     gpiob
                         .pb0
                         .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
@@ -450,7 +453,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 .into_push_pull_output_in_state(
                     &mut gpiod.moder,
                     &mut gpiod.otyper,
-                    GENERATOR_DISABLE_LVL,
+                    GENERATOR_DISABLE_LVL.into(),
                 )
                 .set_speed(Speed::Low),
             en_t: gpiod
@@ -458,7 +461,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 .into_push_pull_output_in_state(
                     &mut gpiod.moder,
                     &mut gpiod.otyper,
-                    GENERATOR_DISABLE_LVL,
+                    GENERATOR_DISABLE_LVL.into(),
                 )
                 .set_speed(Speed::Low),
 
@@ -476,7 +479,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 .into_push_pull_output_in_state(
                     &mut gpioc.moder,
                     &mut gpioc.otyper,
-                    crate::config::LED_DISABLE,
+                    crate::config::LED_DISABLE.into(),
                 )
                 .set_speed(Speed::Low),
             scb: p.SCB,

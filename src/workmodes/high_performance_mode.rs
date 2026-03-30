@@ -24,7 +24,16 @@ use crate::workmodes::{common::ClockConfigProvider, processing::HighPerformanceP
 use super::{output_storage::OutputStorage, WorkMode};
 
 // /PD *M /AD
-const PLL_CFG: (u32, u32, u32) = (6, 40, 2); // (3, 40, 2) = 80 Mhz
+#[cfg(feature = "xtal-24mhz")]
+const PLL_CFG: (u32, u32, u32) = (3, 20, 2); // (3, 40, 2) = 80 Mhz
+#[cfg(feature = "xtal-12mhz")]
+const PLL_CFG: (u32, u32, u32) = (3, 40, 2); // (3, 40, 2) = 80 Mhz
+
+#[cfg(feature = "xtal-24mhz")]
+const SAI_MULTIPLIER: u8 = 12;
+#[cfg(feature = "xtal-12mhz")]
+const SAI_MULTIPLIER: u8 = 24;
+
 const APB1_DEVIDER: u32 = 1; // USB max performance
 const APB2_DEVIDER: u32 = 8;
 
@@ -103,14 +112,7 @@ pub struct HighPerformanceMode {
     vbat_pin: PA1<Analog>,
 
     #[cfg(not(feature = "no-flash"))]
-    qspi: qspi_stm32lx3::qspi::Qspi<(
-        PA3<Alternate<PushPull, 10>>,
-        PA2<Alternate<PushPull, 10>>,
-        PE12<Alternate<PushPull, 10>>,
-        PB0<Alternate<PushPull, 10>>,
-        PA7<Alternate<PushPull, 10>>,
-        PA6<Alternate<PushPull, 10>>,
-    )>,
+    qspi: super::Flash,
     #[cfg(not(feature = "no-flash"))]
     flash_reset_pin: PD11<Output<PushPull>>,
 
@@ -134,7 +136,19 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         #[cfg(not(feature = "no-flash"))]
         let (qspi, flash_reset_pin) = {
             let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
+            #[allow(unused)]
             let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
+
+            #[cfg(feature = "maket")]
+            let d0pin =
+                gpioe
+                    .pe12
+                    .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh);
+            #[cfg(not(feature = "maket"))]
+            let d0pin =
+                gpiob
+                    .pb1
+                    .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl);
 
             super::common::create_qspi(
                 (
@@ -144,9 +158,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                     gpioa
                         .pa2
                         .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
-                    gpioe
-                        .pe12
-                        .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
+                    d0pin,
                     gpiob
                         .pb0
                         .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
@@ -209,7 +221,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 .into_push_pull_output_in_state(
                     &mut gpiod.moder,
                     &mut gpiod.otyper,
-                    GENERATOR_DISABLE_LVL,
+                    GENERATOR_DISABLE_LVL.into(),
                 )
                 .set_speed(Speed::Low),
             en_t: gpiod
@@ -217,7 +229,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 .into_push_pull_output_in_state(
                     &mut gpiod.moder,
                     &mut gpiod.otyper,
-                    GENERATOR_DISABLE_LVL,
+                    GENERATOR_DISABLE_LVL.into(),
                 )
                 .set_speed(Speed::Low),
 
@@ -260,7 +272,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
             _rcc.pllsai1cfgr.modify(|_, w| unsafe {
                 w.pllsai1n()
-                    .bits(24) // * 24
+                    .bits(SAI_MULTIPLIER)
                     .pllsai1q()
                     .bits(0b00) // /2
                     .pllsai1qen()
@@ -425,7 +437,14 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
     }
 
     fn print_clock_config(&self) {
-        super::common::print_clock_config(&self.clocks, "HSI48");
+        super::common::print_clock_config(
+            &self.clocks,
+            if self.clocks.map(|c| c.hsi48()) == Some(true) {
+                "HSI48"
+            } else {
+                "PLLSAI1"
+            },
+        );
     }
 
     fn flash(&mut self) -> Arc<Mutex<stm32l4xx_hal::flash::Parts>> {
