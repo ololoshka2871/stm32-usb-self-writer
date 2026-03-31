@@ -10,7 +10,7 @@
             "name": "cortex-debug (Release)",
             "type": "cortex-debug",
             "cwd": "${workspaceRoot}",
-            "executable": "./target/thumbv7em-none-eabihf/release/stm32-usb-self-writer", // бинарь
+            "executable": "./target/thumbv7em-none-eabihf/release/self-writer", // бинарь
             "request": "attach", // позволяет не прошивать таргет при запуске
             "svdFile": "${workspaceRoot}/STM32L4x3-qspi.svd",
             "servertype": "external", // Подключиться к внешнему отладочному интерфейсу
@@ -26,12 +26,12 @@
             "type": "gdb",
             "request": "attach",
             "name": "Attach (OpenOCD) Release", 
-            "target": "./target/thumbv7em-none-eabihf/release/stm32-usb-self-writer",
+            "target": "./target/thumbv7em-none-eabihf/release/self-writer",
             "gdbpath" : "arm-none-eabi-gdb", // Это тупо какой gdb использовать
             "cwd": "${workspaceRoot}",
             "valuesFormatting": "parseText",
             "autorun": [
-                "file ./target/thumbv7em-none-eabihf/release/stm32-usb-self-writer", // бинарь
+                "file ./target/thumbv7em-none-eabihf/release/self-writer", // бинарь
                 "target extended-remote :2331", // куда коннектиться к openocd
                 "set print asm-demangle on",
                 "set backtrace limit 64",

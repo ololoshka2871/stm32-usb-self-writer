@@ -143,3 +143,31 @@ where
         reset,
     )
 }
+
+/// Initialize RTC using a provided I2C constructor closure.
+///
+/// The closure should attempt to construct and return an I2C peripheral
+/// (`Ok(i2c)`) or `Err(E)` if construction is not possible.
+pub fn init_rtc_with<I2C, F, E>(make_i2c: F) -> Result<(), freertos_rust::FreeRtosError>
+where
+    F: FnOnce() -> Result<I2C, freertos_rust::FreeRtosError>,
+    I2C: embedded_hal::blocking::i2c::WriteRead<Error = E>
+        + embedded_hal::blocking::i2c::Write<Error = E>
+        + 'static,
+{
+    match make_i2c() {
+        Ok(i2c) => {
+            crate::rtc::init(i2c);
+            Ok(())
+        }
+        Err(e) => {
+            defmt::error!("Failed to initialize I2C");
+            Err(e)
+        },
+    }
+}
+
+pub fn new_i2c_config(clocks: stm32l4xx_hal::rcc::Clocks) -> stm32l4xx_hal::i2c::Config {
+    use stm32l4xx_hal::prelude::_stm32l4_hal_time_U32Ext;
+    stm32l4xx_hal::i2c::Config::new(100u32.khz(), clocks)
+}

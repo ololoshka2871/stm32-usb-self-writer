@@ -11,6 +11,7 @@ mod protobuf;
 mod sensors;
 mod settings;
 mod support;
+mod rtc;
 mod threads;
 mod workmodes;
 

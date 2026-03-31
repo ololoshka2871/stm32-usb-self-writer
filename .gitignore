@@ -27,3 +27,5 @@ __pycache__/
 # pdf
 *.pdf
 !maket.pdf
+!STM32L4xx.pdf
+!ARV_v2.pdf

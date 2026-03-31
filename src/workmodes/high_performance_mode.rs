@@ -3,15 +3,11 @@ use freertos_rust::{Duration, Mutex, Queue, Task, TaskPriority};
 
 #[allow(unused_imports)]
 use stm32l4xx_hal::gpio::{
-    Alternate, Analog, Output, PushPull, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA6, PA7, PA8, PB0,
-    PC10, PD10, PD11, PD13, PE12,
+    Alternate, Analog, OpenDrain, Output, PushPull, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA6,
+    PA7, PA8, PB0, PC0, PC1, PC10, PC2, PD10, PD11, PD13, PE12,
 };
 use stm32l4xx_hal::{
-    adc::ADC,
-    prelude::*,
-    rcc::{Enable, PllConfig, Reset},
-    stm32,
-    time::Hertz,
+    adc::ADC, gpio::{Input, PullUp}, prelude::*, rcc::{Enable, PllConfig, Reset}, stm32, time::Hertz
 };
 
 use crate::sensors::freqmeter::master_counter;
@@ -106,6 +102,10 @@ pub struct HighPerformanceMode {
     timer2: stm32l4xx_hal::stm32l4::stm32l4x3::TIM2,
 
     led_pin: PC10<Output<PushPull>>,
+    rtc_scl: Option<PC0<Alternate<OpenDrain, 4>>>,
+    rtc_sda: Option<PC1<Alternate<OpenDrain, 4>>>,
+    rtc_1hz: Option<PC2<Input<PullUp>>>,
+    i2c3: Option<stm32l4xx_hal::stm32::I2C3>,
 
     adc: stm32l4xx_hal::stm32::ADC1,
     adc_common: stm32l4xx_hal::device::ADC_COMMON,
@@ -132,6 +132,25 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         let mut gpioa = dp.GPIOA.split(&mut rcc.ahb2);
         let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
         let mut gpiod = dp.GPIOD.split(&mut rcc.ahb2);
+
+        // Reserve PC0 as SCL and PC1 as SDA for I2C3 (open-drain) and PC2 for 1Hz input
+        let mut rtc_scl_pin = gpioc.pc0.into_alternate_open_drain(
+            &mut gpioc.moder,
+            &mut gpioc.otyper,
+            &mut gpioc.afrl,
+        );
+        rtc_scl_pin.internal_pull_up(&mut gpioc.pupdr, true); // enable internal pull-up for I2C lines
+
+        let mut rtc_sda_pin = gpioc.pc1.into_alternate_open_drain(
+            &mut gpioc.moder,
+            &mut gpioc.otyper,
+            &mut gpioc.afrl,
+        );
+        rtc_sda_pin.internal_pull_up(&mut gpioc.pupdr, true); // enable internal pull-up for I2C lines
+
+        let mut rtc_1hz_pin = gpioc
+            .pc2
+            .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
         #[cfg(not(feature = "no-flash"))]
         let (qspi, flash_reset_pin) = {
@@ -247,6 +266,11 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             adc_common: dp.ADC_COMMON,
             vbat_pin: gpioa.pa1.into_analog(&mut gpioa.moder, &mut gpioa.pupdr),
 
+            rtc_sda: Some(rtc_sda_pin),
+            rtc_scl: Some(rtc_scl_pin),
+            rtc_1hz: Some(rtc_1hz_pin),
+            i2c3: Some(dp.I2C3),
+
             sensor_command_queue: Arc::new(freertos_rust::Queue::new(15).unwrap()),
 
             output: Arc::new(Mutex::new(OutputStorage::default()).unwrap()),
@@ -332,6 +356,36 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
     fn start_threads(mut self) -> Result<(), freertos_rust::FreeRtosError> {
         let sys_clk = unsafe { self.clocks.unwrap_unchecked().hclk() };
+
+        // Initialize RTC and enable EXTI via shared helper.
+        crate::workmodes::common::init_rtc_with(|| {
+            use crate::workmodes::common::new_i2c_config;
+            use stm32l4xx_hal::i2c::I2c;
+
+            if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = (
+                self.rtc_scl.take(),
+                self.rtc_sda.take(),
+                self.i2c3.take(),
+                self.clocks.take(),
+            ) {
+                let config = new_i2c_config(clocks);
+                Ok(I2c::i2c3(i2c_per, (scl, sda), config, &mut self.rcc.apb1r1))
+            } else {
+                Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
+            }
+        })?;
+
+        let time = crate::rtc::rtc_get_time()
+            .map_err(|_| freertos_rust::FreeRtosError::ProcessorHasShutDown)?;
+        defmt::info!(
+            "RTC time: {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            time.year,
+            time.month,
+            time.day,
+            time.hour,
+            time.minute,
+            time.second
+        );
 
         crate::support::led::led_init(self.led_pin);
 
