@@ -15,6 +15,7 @@ use super::{
 };
 
 pub struct FlashDiffWriter {
+    #[allow(dead_code)]
     master_counter_info: MasterTimerInfo,
     next_page_number: u32,
     crc_calc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>,
@@ -114,7 +115,10 @@ impl WriteController<DataBlock> for FlashDiffWriter {
             let packer = DataBlockPacker::builder()
                 .set_ids(page_number.checked_sub(1).unwrap_or_default(), page_number)
                 .set_size(crate::main_data_storage::flash_page_size() as usize)
-                .set_timestamp(self.master_counter_info.uptime_ms())
+                .set_timestamp(
+                    /*self.master_counter_info.uptime_ms()*/
+                    crate::rtc::rtc_get_time().to_timestamp_ms(),
+                )
                 .set_fref(self.fref_mul * fref as f32)
                 .set_write_cfg(base_interval_ms, interleave_ratio)
                 .build();

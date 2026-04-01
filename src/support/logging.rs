@@ -2,7 +2,6 @@
 
 /// global logger
 use defmt_rtt as _;
-use freertos_rust::FreeRtosUtils;
 use panic_abort as _;
 
 /*
@@ -15,7 +14,4 @@ defmt::timestamp!("{=usize}", {
 });
 */
 
-defmt::timestamp!(
-    "[{:?}T]",
-    crate::workmodes::common::Ticks(FreeRtosUtils::get_tick_count())
-);
+defmt::timestamp!("[{}]", crate::rtc::rtc_get_time());

@@ -6,7 +6,7 @@
     // Убрать ошибку Can't find crate for 'test'
     "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
     "rust-analyzer.checkOnSave": false,
-    "cortex-debug.variableUseNaturalFormat": false,
+    "cortex-debug.variableUseNaturalFormat": true,
     "rust-analyzer.cargo.buildScripts.enable": false,
     "rust-analyzer.cargo.buildScripts.overrideCommand": [
         "cargo", "check", "--quiet", "--workspace", "--message-format=json",

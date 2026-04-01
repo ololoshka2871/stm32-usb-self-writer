@@ -48,12 +48,12 @@ flash-settings-rs = { path = "lib/flash-settings.rs" }
 my-proc-macro = { path = "lib/my-proc-macro" }
 qspi-stm32lx3 = { path = "lib/qspi_stm32l4x3" }
 
-prost = { version = "0.14", default-features = false, features = ["derive"] }
+prost = { version = "0.13", default-features = false, features = ["derive"] }
 
 [build-dependencies]
 cc = "1.0.52"
 freertos-cargo-build = "0.1.1"
-prost-build = "0.14"
+prost-build = "0.13"
 
 [profile.dev.package."*"]
 opt-level = "z"

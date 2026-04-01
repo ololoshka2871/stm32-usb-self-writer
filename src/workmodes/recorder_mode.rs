@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use freertos_rust::{Duration, Mutex, Task, TaskPriority};
 use stm32l4xx_hal::{
     adc::ADC,
-    gpio::{Floating, Input, PullUp},
+    gpio::{Input, PullUp},
     prelude::*,
     rcc::{Enable, PllConfig, Reset},
     stm32,
@@ -396,7 +396,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
         );
         rtc_sda_pin.internal_pull_up(&mut gpioc.pupdr, true); // enable internal pull-up for I2C lines
 
-        let mut rtc_1hz_pin = gpioc
+        let rtc_1hz_pin = gpioc
             .pc2
             .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
@@ -593,8 +593,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
             }
         })?;
 
-        let time = crate::rtc::rtc_get_time()
-            .map_err(|_| freertos_rust::FreeRtosError::ProcessorHasShutDown)?;
+        let time = crate::rtc::rtc_get_time();
         defmt::info!(
             "RTC time: {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
             time.year,

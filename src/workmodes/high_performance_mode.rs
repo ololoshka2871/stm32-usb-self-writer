@@ -7,7 +7,12 @@ use stm32l4xx_hal::gpio::{
     PA7, PA8, PB0, PC0, PC1, PC10, PC2, PD10, PD11, PD13, PE12,
 };
 use stm32l4xx_hal::{
-    adc::ADC, gpio::{Input, PullUp}, prelude::*, rcc::{Enable, PllConfig, Reset}, stm32, time::Hertz
+    adc::ADC,
+    gpio::{Input, PullUp},
+    prelude::*,
+    rcc::{Enable, PllConfig, Reset},
+    stm32,
+    time::Hertz,
 };
 
 use crate::sensors::freqmeter::master_counter;
@@ -148,7 +153,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         );
         rtc_sda_pin.internal_pull_up(&mut gpioc.pupdr, true); // enable internal pull-up for I2C lines
 
-        let mut rtc_1hz_pin = gpioc
+        let rtc_1hz_pin = gpioc
             .pc2
             .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
@@ -375,8 +380,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             }
         })?;
 
-        let time = crate::rtc::rtc_get_time()
-            .map_err(|_| freertos_rust::FreeRtosError::ProcessorHasShutDown)?;
+        let time = crate::rtc::rtc_get_time();
         defmt::info!(
             "RTC time: {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
             time.year,

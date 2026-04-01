@@ -49,6 +49,7 @@ where
             day: bcd2dec(regs[3] & 0x3F),
             month: bcd2dec(regs[4] & 0x1F),
             year: 2000 + bcd2dec(regs[5]) as u16,
+            ms: 0,
         })
     }
 

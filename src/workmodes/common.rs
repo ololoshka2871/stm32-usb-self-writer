@@ -93,7 +93,6 @@ pub fn create_monitor(
     _output: Arc<Mutex<OutputStorage>>,
 ) -> Result<(), freertos_rust::FreeRtosError> {
     #[cfg(feature = "monitor")]
-    #[cfg(debug_assertions)]
     {
         use crate::threads;
         use freertos_rust::{Task, TaskPriority};
