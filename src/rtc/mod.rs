@@ -71,22 +71,25 @@ pub trait Rtc {
     fn enable_1hz_exti(&mut self) -> Result<(), ()>;
 }
 
-static mut RTC_INSTANCE: Option<InternalRtc> = None;
+static mut RTC_INSTANCE: Option<Box<dyn Rtc>> = None;
 static mut EXTERNAL_RTC_INSTANCE: Option<Box<dyn Rtc>> = None;
 static mut EXTI2_SYNC_TASK: Option<freertos_rust::Task> = None;
 
-pub fn set_global_rtc(r: InternalRtc) {
-    unsafe { RTC_INSTANCE = Some(r) }
+pub fn set_global_rtc<L>(r: InternalRtc<L>)
+where
+    L: embedded_hal::digital::v2::OutputPin + 'static,
+{
+    unsafe { RTC_INSTANCE = Some(Box::new(r)) }
 }
 
 pub fn with_global_rtc<F, R>(f: F) -> Option<R>
 where
-    F: FnOnce(&mut InternalRtc) -> R,
+    F: FnOnce(&mut dyn Rtc) -> R,
 {
     // SAFETY: single-threaded initialization expected during startup.
     unsafe {
         if let Some(ref mut b) = &mut RTC_INSTANCE {
-            Some(f(b))
+            Some(f(b.as_mut()))
         } else {
             None
         }
@@ -98,14 +101,15 @@ where
 ///
 /// This function is intentionally generic in the I2C type and in pin types so it
 /// can be called from both workmodes after pins/peripherals are available.
-pub fn init<I2C, E>(mut i2c: I2C)
+pub fn init<I2C, L, E>(mut i2c: I2C, led: L)
 where
     I2C: embedded_hal::blocking::i2c::WriteRead<Error = E>
         + embedded_hal::blocking::i2c::Write<Error = E>
         + 'static,
+    L: embedded_hal::digital::v2::OutputPin + 'static,
 {
     // Always initialize MCU internal RTC first.
-    set_global_rtc(InternalRtc::new());
+    set_global_rtc(InternalRtc::new(led));
 
     // Try to enable LSE for internal RTC; fallback to LSI if needed.
     let rcc_regs = unsafe { &*stm32::RCC::ptr() };

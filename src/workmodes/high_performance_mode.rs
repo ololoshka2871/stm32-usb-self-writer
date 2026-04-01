@@ -107,6 +107,7 @@ pub struct HighPerformanceMode {
     timer2: stm32l4xx_hal::stm32l4::stm32l4x3::TIM2,
 
     led_pin: PC10<Output<PushPull>>,
+    tp1: super::TP1,
     rtc_scl: Option<PC0<Alternate<OpenDrain, 4>>>,
     rtc_sda: Option<PC1<Alternate<OpenDrain, 4>>>,
     rtc_1hz: Option<PC2<Input<PullUp>>>,
@@ -202,6 +203,18 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             )
         };
 
+        #[cfg(feature = "maket")]
+        let tp1 = gpiod
+            .pd3
+            .into_push_pull_output_in_state(&mut gpiod.moder, &mut gpiod.otyper, PinState::Low)
+            .set_speed(Speed::Low);
+
+        #[cfg(not(feature = "maket"))]
+        let tp1 = gpiod
+            .pd0
+            .into_push_pull_output_in_state(&mut gpiod.moder, &mut gpiod.otyper, PinState::Low)
+            .set_speed(Speed::Low);
+
         HighPerformanceMode {
             flash: Arc::new(Mutex::new(dp.FLASH.constrain()).unwrap()),
             crc: Arc::new(
@@ -266,6 +279,8 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 .pc10
                 .into_push_pull_output_in_state(&mut gpioc.moder, &mut gpioc.otyper, PinState::High)
                 .set_speed(Speed::Low),
+
+            tp1,
 
             adc: dp.ADC1,
             adc_common: dp.ADC_COMMON,
@@ -363,22 +378,29 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         let sys_clk = unsafe { self.clocks.unwrap_unchecked().hclk() };
 
         // Initialize RTC and enable EXTI via shared helper.
-        crate::workmodes::common::init_rtc_with(|| {
-            use crate::workmodes::common::new_i2c_config;
-            use stm32l4xx_hal::i2c::I2c;
-
-            if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = (
+        {
+            let apb1r1 = &mut self.rcc.apb1r1;
+            let pins = (
                 self.rtc_scl.take(),
                 self.rtc_sda.take(),
                 self.i2c3.take(),
                 self.clocks.take(),
-            ) {
-                let config = new_i2c_config(clocks);
-                Ok(I2c::i2c3(i2c_per, (scl, sda), config, &mut self.rcc.apb1r1))
-            } else {
-                Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
-            }
-        })?;
+            );
+            crate::workmodes::common::init_rtc_with(
+                move || {
+                    use crate::workmodes::common::new_i2c_config;
+                    use stm32l4xx_hal::i2c::I2c;
+
+                    if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = pins {
+                        let config = new_i2c_config(clocks);
+                        Ok(I2c::i2c3(i2c_per, (scl, sda), config, apb1r1))
+                    } else {
+                        Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
+                    }
+                },
+                self.tp1,
+            )?;
+        }
 
         let time = crate::rtc::rtc_get_time();
         defmt::info!(

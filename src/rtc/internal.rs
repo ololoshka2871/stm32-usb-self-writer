@@ -2,10 +2,12 @@ use stm32l4xx_hal::stm32;
 
 use super::{DateTime, Rtc};
 
-pub struct InternalRtc;
+pub struct InternalRtc<L> {
+    led: L,
+}
 
-impl InternalRtc {
-    pub fn new() -> Self {
+impl<L: embedded_hal::digital::v2::OutputPin> InternalRtc<L> {
+    pub fn new(led: L) -> Self {
         let rcc = unsafe { &*stm32::RCC::ptr() };
         let pwr = unsafe { &*stm32::PWR::ptr() };
         let rtc = unsafe { &*stm32::RTC::ptr() };
@@ -45,7 +47,7 @@ impl InternalRtc {
         rtc.isr.modify(|_, w| w.init().clear_bit());
         while rtc.isr.read().initf().bit_is_set() {}
 
-        Self {}
+        Self { led }
     }
 
     fn wait_rtc_sync(&self) {
@@ -57,7 +59,10 @@ impl InternalRtc {
     }
 }
 
-impl Rtc for InternalRtc {
+impl<L> Rtc for InternalRtc<L>
+where
+    L: embedded_hal::digital::v2::OutputPin,
+{
     fn set_time(&mut self, dt: DateTime) -> Result<(), ()> {
         let rtc = unsafe { &*stm32::RTC::ptr() };
 
@@ -98,6 +103,8 @@ impl Rtc for InternalRtc {
     fn get_time(&mut self) -> Result<DateTime, ()> {
         let rtc = unsafe { &*stm32::RTC::ptr() };
 
+        self.led.set_high().ok(); // indicate RTC read start
+
         // Synchronize shadow registers from RTC domain before reading.
         self.wait_rtc_sync();
 
@@ -120,6 +127,8 @@ impl Rtc for InternalRtc {
             // If values changed while reading, resync and retry.
             self.wait_rtc_sync();
         }
+
+        self.led.set_low().ok(); // indicate RTC read end
 
         let second = tr.st().bits() * 10 + tr.su().bits();
         let minute = tr.mnt().bits() * 10 + tr.mnu().bits();

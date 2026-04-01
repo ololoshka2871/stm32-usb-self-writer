@@ -1,5 +1,7 @@
 #[allow(unused_imports)]
-use stm32l4xx_hal::gpio::{Alternate, PushPull, PA2, PA3, PA6, PA7, PB0, PB1, PE12};
+use stm32l4xx_hal::gpio::{
+    Alternate, Output, PushPull, PA2, PA3, PA6, PA7, PB0, PB1, PD0, PD3, PE12,
+};
 
 use alloc::sync::Arc;
 use freertos_rust::{FreeRtosError, Mutex};
@@ -27,6 +29,11 @@ pub type Flash = qspi_stm32lx3::qspi::Qspi<(
     PA7<Alternate<PushPull, 10>>,
     PA6<Alternate<PushPull, 10>>,
 )>;
+
+#[cfg(feature = "maket")]
+pub type TP1 = PD3<Output<PushPull>>;
+#[cfg(not(feature = "maket"))]
+pub type TP1 = PD0<Output<PushPull>>;
 
 pub trait WorkMode<T> {
     fn new(p: cortex_m::Peripherals, dp: stm32l4xx_hal::device::Peripherals) -> T;
