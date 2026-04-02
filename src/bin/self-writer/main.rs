@@ -11,7 +11,6 @@ extern crate alloc;
 use defmt_rtt as _; // global logger
 use panic_abort as _;
 
-use cortex_m_rt::entry;
 use stm32l4xx_hal::stm32;
 
 use rtic_monotonics::fugit::RateExtU32;
@@ -19,21 +18,16 @@ use stm32l4xx_hal::flash::FlashExt;
 use stm32l4xx_hal::prelude::*;
 
 use rtic::app;
+use rtic_monotonics::{systick_monotonic, Monotonic};
 
 use stm32_usb_self_writer::{
-    config, define_self_writer_monotonic, is_usb_connected, start_at_mode,
-    workmodes::common::ClockConfigProvider, FreeRtosErrorContainer, HighPerformanceMode,
-    RecorderMode,
+    clocking::{ClockConfigProvider, PllConfigProvider},
+    config, is_usb_connected,
 };
 
 //---------------------------------------------------------------
 
-define_self_writer_monotonic!(SelfWriterMonotonicSlow, {
-    config::SYST_TIMER_HZ_SELF_WRITER_MODE
-});
-define_self_writer_monotonic!(SelfWriterMonotonicFast, {
-    config::SYST_TIMER_HZ_HIGH_FREQ_MODE
-});
+systick_monotonic!(Mono, config::SYST_TIMER_HZ);
 
 //-----------------------------------------------------------------------------
 
@@ -43,8 +37,6 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RTC_ALARM, LCD])]
 mod app {
-    use stm32l4xx_hal::gpio;
-
     use super::*;
 
     #[shared]
@@ -53,8 +45,6 @@ mod app {
     #[local]
     struct Local {
         led: types::Led,
-        flash1: types::Flash1,
-        flash_reset_pin: types::FlashResetPin,
     }
 
     #[init]
@@ -102,11 +92,7 @@ mod app {
         defmt::info!("\tHeap");
 
         // Initialize the systick interrupt & obtain the token to prove that we did
-        if high_perf_mode {
-            SelfWriterMonotonicFast::start(ctx.core.SYST, clocks.sysclk().0);
-        } else {
-            SelfWriterMonotonicSlow::start(ctx.core.SYST, clocks.sysclk().0);
-        }
+        Mono::start(ctx.core.SYST, clocks.sysclk().0);
         defmt::info!("\tSysTick");
 
         let mut gpioa = ctx.device.GPIOA.split(&mut rcc.ahb2);
@@ -115,65 +101,6 @@ mod app {
         let mut gpiod = ctx.device.GPIOD.split(&mut rcc.ahb2);
         let mut gpioe = ctx.device.GPIOE.split(&mut rcc.ahb2);
 
-        let (flash1, flash_reset_pin) = {
-            #[cfg(feature = "no-flash")]
-            {
-                ((), ())
-            }
-
-            #[cfg(not(feature = "no-flash"))]
-            {
-                #[cfg(feature = "maket")]
-                let io_0 =
-                    gpioe
-                        .pe12
-                        .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh);
-                #[cfg(not(feature = "maket"))]
-                let io_0 =
-                    gpiob
-                        .pb1
-                        .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl);
-
-                stm32_usb_self_writer::workmodes::common::create_qspi(
-                    (
-                        gpioa.pa3.into_alternate(
-                            &mut gpioa.moder,
-                            &mut gpioa.otyper,
-                            &mut gpioa.afrl,
-                        ),
-                        gpioa.pa2.into_alternate(
-                            &mut gpioa.moder,
-                            &mut gpioa.otyper,
-                            &mut gpioa.afrl,
-                        ),
-                        io_0,
-                        gpiob.pb0.into_alternate(
-                            &mut gpiob.moder,
-                            &mut gpiob.otyper,
-                            &mut gpiob.afrl,
-                        ),
-                        gpioa.pa7.into_alternate(
-                            &mut gpioa.moder,
-                            &mut gpioa.otyper,
-                            &mut gpioa.afrl,
-                        ),
-                        gpioa.pa6.into_alternate(
-                            &mut gpioa.moder,
-                            &mut gpioa.otyper,
-                            &mut gpioa.afrl,
-                        ),
-                    ),
-                    gpiod.pd11.into_push_pull_output_in_state(
-                        &mut gpiod.moder,
-                        &mut gpiod.otyper,
-                        PinState::Low,
-                    ),
-                    &mut rcc.ahb3,
-                )
-            }
-        };
-        defmt::info!("\tQSPI");
-
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
             &mut gpioc.otyper,
@@ -181,13 +108,27 @@ mod app {
         );
         defmt::info!("\tLED");
 
-        (
-            Shared {},
-            Local {
-                led,
-                flash1,
-                flash_reset_pin,
-            },
-        )
+        //---------------------------------------------------------------------
+
+        regular_test::spawn().expect("Failed to spawn regular test task");
+
+        defmt::info!("Tasks spawned");
+
+        //---------------------------------------------------------------------
+
+        (Shared {}, Local { led })
+    }
+
+    //-------------------------------------------------------------------------
+
+    #[task]
+    async fn regular_test(_ctx: regular_test::Context) {
+        use rtic_monotonics::fugit::ExtU64;
+
+        defmt::info!("Regular test task");
+        loop {
+            defmt::info!("Hello from regular test task!");
+            Mono::delay(125u64.millis()).await;
+        }
     }
 }

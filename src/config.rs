@@ -10,8 +10,7 @@ pub const XTAL_FREQ: u32 = 12_000_000;
 
 pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
 pub const HW_VERSION: u32 = 1;
-pub const SYST_TIMER_HZ_SELF_WRITER_MODE: u32 = 100;
-pub const SYST_TIMER_HZ_HIGH_FREQ_MODE: u32 = 1_000; 
+pub const SYST_TIMER_HZ: u32 = 100;
 
 //-----------------------------------------------------------------------------
 

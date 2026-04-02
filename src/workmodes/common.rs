@@ -12,31 +12,6 @@ use stm32l4xx_hal::{
 
 use super::output_storage::OutputStorage;
 
-pub fn to_pll_devider(v: u32) -> PllDivider {
-    match v {
-        2 => PllDivider::Div2,
-        4 => PllDivider::Div4,
-        6 => PllDivider::Div6,
-        8 => PllDivider::Div8,
-        _ => panic!(),
-    }
-}
-
-pub trait ClockConfigProvider {
-    fn core_frequency() -> Hertz;
-    fn apb1_frequency() -> Hertz;
-    fn apb2_frequency() -> Hertz;
-    fn master_counter_frequency() -> Hertz;
-    fn pll_config() -> PllConfig;
-    fn xtal2master_freq_multiplier() -> f64;
-
-    fn configure_clocks(
-        flash: &mut stm32l4xx_hal::flash::Parts,
-        rcc: &mut stm32l4xx_hal::rcc::Rcc,
-        pwr: &mut stm32l4xx_hal::pwr::Pwr,
-    ) -> stm32l4xx_hal::rcc::Clocks;
-}
-
 #[derive(Default)]
 pub struct Ticks(pub u32);
 

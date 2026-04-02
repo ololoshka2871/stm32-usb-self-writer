@@ -6,10 +6,7 @@ use stm32l4xx_hal::gpio::{Analog, PA0, PA1, PA8, PD10, PD13};
 
 use stm32_usb_self_writer::{
     config,
-    workmodes::{
-        high_performance_mode::{HighPerformanceClockConfigProvider, PllConfigProvider},
-        recorder_mode::RecorderClockConfigProvider,
-    },
+    clocking::*,
 };
 
 //-----------------------------------------------------------------------------
