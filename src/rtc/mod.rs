@@ -68,18 +68,16 @@ pub trait Rtc {
     fn get_time(&mut self) -> Result<DateTime, ()>;
     /// Enable 1 Hz tick routed to EXTI (PC2). Implementations should configure
     /// the chip to drive the pin and return Ok.
-    fn enable_1hz_exti(&mut self) -> Result<(), ()>;
+    fn enable_1hz_int(&mut self) -> Result<(), ()>;
 }
 
-static mut RTC_INSTANCE: Option<Box<dyn Rtc>> = None;
+static mut RTC_INSTANCE: Option<InternalRtc> = None;
 static mut EXTERNAL_RTC_INSTANCE: Option<Box<dyn Rtc>> = None;
 static mut EXTI2_SYNC_TASK: Option<freertos_rust::Task> = None;
+static mut RTC_PERIODIC_TASK: Option<freertos_rust::Task> = None;
 
-pub fn set_global_rtc<L>(r: InternalRtc<L>)
-where
-    L: embedded_hal::digital::v2::OutputPin + 'static,
-{
-    unsafe { RTC_INSTANCE = Some(Box::new(r)) }
+pub fn set_global_rtc(r: InternalRtc) {
+    unsafe { RTC_INSTANCE = Some(r) }
 }
 
 pub fn with_global_rtc<F, R>(f: F) -> Option<R>
@@ -89,7 +87,7 @@ where
     // SAFETY: single-threaded initialization expected during startup.
     unsafe {
         if let Some(ref mut b) = &mut RTC_INSTANCE {
-            Some(f(b.as_mut()))
+            Some(f(b))
         } else {
             None
         }
@@ -101,15 +99,14 @@ where
 ///
 /// This function is intentionally generic in the I2C type and in pin types so it
 /// can be called from both workmodes after pins/peripherals are available.
-pub fn init<I2C, L, E>(mut i2c: I2C, led: L)
+pub fn init<I2C, E>(mut i2c: I2C)
 where
     I2C: embedded_hal::blocking::i2c::WriteRead<Error = E>
         + embedded_hal::blocking::i2c::Write<Error = E>
         + 'static,
-    L: embedded_hal::digital::v2::OutputPin + 'static,
 {
     // Always initialize MCU internal RTC first.
-    set_global_rtc(InternalRtc::new(led));
+    set_global_rtc(InternalRtc::new());
 
     // Try to enable LSE for internal RTC; fallback to LSI if needed.
     let rcc_regs = unsafe { &*stm32::RCC::ptr() };
@@ -168,7 +165,7 @@ where
                 }
             }
 
-            let _ = ext_rtc.enable_1hz_exti();
+            let _ = ext_rtc.enable_1hz_int();
 
             enable_exti2();
             if let Err(_) = start_rtc_sync_task() {
@@ -187,6 +184,77 @@ pub fn rtc_get_time() -> DateTime {
     with_global_rtc(|r| r.get_time())
         .unwrap_or(Ok(DateTime::default()))
         .unwrap_or_default()
+}
+
+pub fn rtc_set_alarm_periodic(period_ms: u32) -> Result<(), ()> {
+    use cortex_m::peripheral::NVIC;
+
+    if period_ms == 0 {
+        return Err(());
+    }
+
+    let current_task = Task::current().map_err(|_| ())?;
+    unsafe {
+        RTC_PERIODIC_TASK = Some(current_task);
+    }
+
+    let rtc = unsafe { &*stm32::RTC::ptr() };
+    let exti = unsafe { &*stm32::EXTI::ptr() };
+
+    let rtc_clk_hz: u32 = {
+        let rcc = unsafe { &*stm32::RCC::ptr() };
+        if rcc.bdcr.read().rtcsel().bits() == 0b01 {
+            32_768
+        } else {
+            32_000
+        }
+    };
+
+    // WUCKSEL = 0b000 => RTCCLK / 16
+    let wakeup_clk_hz = rtc_clk_hz / 16;
+    let ticks = ((period_ms as u64 * wakeup_clk_hz as u64 + 999) / 1000)
+        .clamp(1, 0x1_0000) as u32;
+
+    // Unlock RTC write protection
+    rtc.wpr.write(|w| unsafe { w.bits(0xCA) });
+    rtc.wpr.write(|w| unsafe { w.bits(0x53) });
+
+    rtc.cr.modify(|_, w| {
+        w.wute().clear_bit();
+        w.wutie().clear_bit()
+    });
+    while rtc.isr.read().wutwf().bit_is_clear() {}
+
+    rtc.cr.modify(|_, w| unsafe { w.wucksel().bits(0b000) });
+    rtc.wutr.write(|w| unsafe { w.wut().bits((ticks - 1) as u16) });
+    rtc.isr.modify(|_, w| w.wutf().clear_bit());
+
+    // Route wakeup event to EXTI20
+    exti.imr1.modify(|_, w| w.mr20().set_bit());
+    exti.rtsr1.modify(|_, w| w.tr20().set_bit());
+    exti.pr1.write(|w| w.pr20().set_bit());
+
+    rtc.cr.modify(|_, w| {
+        w.wutie().set_bit();
+        w.wute().set_bit()
+    });
+
+    // Re-lock write protection
+    rtc.wpr.write(|w| unsafe { w.bits(0xFF) });
+
+    unsafe {
+        let mut nvic = cortex_m::Peripherals::steal().NVIC;
+        nvic.set_priority(stm32::Interrupt::RTC_WKUP, crate::config::USB_INTERRUPT_PRIO);
+        NVIC::unmask(stm32::Interrupt::RTC_WKUP);
+    }
+
+    Ok(())
+}
+
+pub fn rtc_wait_periodic_tick() -> Result<(), ()> {
+    let task = Task::current().map_err(|_| ())?;
+    let _ = task.take_notification(true, Duration::infinite());
+    Ok(())
 }
 
 fn sync_external_to_internal() {
@@ -252,6 +320,10 @@ pub fn enable_exti2() {
         // enable rising trigger
         exti.rtsr1.modify(|_, w| w.tr2().set_bit());
 
+        // FreeRTOS-safe ISR priority for task notification from ISR.
+        let mut nvic = cortex_m::Peripherals::steal().NVIC;
+        nvic.set_priority(stm32::Interrupt::EXTI2, crate::config::USB_INTERRUPT_PRIO);
+
         // enable NVIC for EXTI2
         NVIC::unmask(stm32::Interrupt::EXTI2);
     }
@@ -276,6 +348,24 @@ fn EXTI2() {
     // Clear EXTI2 pending bit.
     let exti = unsafe { &*stm32::EXTI::ptr() };
     exti.pr1.write(|w| w.pr2().set_bit());
+}
+
+#[allow(non_snake_case)]
+#[allow(unused)]
+#[cortex_m_rt::interrupt]
+fn RTC_WKUP() {
+    let interrupt_ctx = InterruptContext::new();
+    unsafe {
+        if let Some(task) = RTC_PERIODIC_TASK.as_ref() {
+            let _ = task.notify_from_isr(&interrupt_ctx, TaskNotification::Increment);
+        }
+    }
+
+    let rtc = unsafe { &*stm32::RTC::ptr() };
+    let exti = unsafe { &*stm32::EXTI::ptr() };
+
+    rtc.isr.modify(|_, w| w.wutf().clear_bit());
+    exti.pr1.write(|w| w.pr20().set_bit());
 }
 
 //-----------------------------------------------------------------------------

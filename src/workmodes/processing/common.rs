@@ -1,4 +1,4 @@
-use core::{cmp::min, ops::Sub};
+use core::ops::Sub;
 
 use freertos_rust::{CurrentTask, Duration, DurationTicks, Mutex};
 use stm32l4xx_hal::time::Hertz;
@@ -63,8 +63,9 @@ fn fref_getter() -> f64 {
 fn mt_getter(ch: FChannel) -> f64 {
     read_settings(|(ws, _)| {
         Ok(match ch {
-            FChannel::Pressure => ws.PMesureTime_ms,
-            FChannel::Temperature => ws.TMesureTime_ms,
+            FChannel::Pressure | FChannel::Temperature => {
+                core::cmp::max(ws.writeConfig.BaseInterval_ms, 1)
+            }
         })
     }) as f64
 }
@@ -257,7 +258,11 @@ pub fn process_t_cpu(
             ws.monitoring.CPUOvarheat = true;
         }
 
-        Ok((overheat_rised, ws.TMesureTime_ms, ws.TCPUEnabled))
+        Ok((
+            overheat_rised,
+            core::cmp::max(ws.writeConfig.BaseInterval_ms, 1),
+            ws.TCPUEnabled,
+        ))
     });
     let _ = output.lock(Duration::infinite()).map(|mut guard| {
         if continue_work {
@@ -314,7 +319,7 @@ pub fn process_vbat(
                 v_bat,
                 overvoltage_raised,
                 undervoltage,
-                min(ws.PMesureTime_ms, ws.TMesureTime_ms),
+                core::cmp::max(ws.writeConfig.BaseInterval_ms, 1),
                 vbat_enabled,
             ))
         });

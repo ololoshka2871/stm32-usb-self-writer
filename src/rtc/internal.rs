@@ -2,12 +2,10 @@ use stm32l4xx_hal::stm32;
 
 use super::{DateTime, Rtc};
 
-pub struct InternalRtc<L> {
-    led: L,
-}
+pub struct InternalRtc;
 
-impl<L: embedded_hal::digital::v2::OutputPin> InternalRtc<L> {
-    pub fn new(led: L) -> Self {
+impl InternalRtc {
+    pub fn new() -> Self {
         let rcc = unsafe { &*stm32::RCC::ptr() };
         let pwr = unsafe { &*stm32::PWR::ptr() };
         let rtc = unsafe { &*stm32::RTC::ptr() };
@@ -47,7 +45,7 @@ impl<L: embedded_hal::digital::v2::OutputPin> InternalRtc<L> {
         rtc.isr.modify(|_, w| w.init().clear_bit());
         while rtc.isr.read().initf().bit_is_set() {}
 
-        Self { led }
+        Self
     }
 
     fn wait_rtc_sync(&self) {
@@ -59,10 +57,7 @@ impl<L: embedded_hal::digital::v2::OutputPin> InternalRtc<L> {
     }
 }
 
-impl<L> Rtc for InternalRtc<L>
-where
-    L: embedded_hal::digital::v2::OutputPin,
-{
+impl Rtc for InternalRtc {
     fn set_time(&mut self, dt: DateTime) -> Result<(), ()> {
         let rtc = unsafe { &*stm32::RTC::ptr() };
 
@@ -103,8 +98,6 @@ where
     fn get_time(&mut self) -> Result<DateTime, ()> {
         let rtc = unsafe { &*stm32::RTC::ptr() };
 
-        self.led.set_high().ok(); // indicate RTC read start
-
         // Synchronize shadow registers from RTC domain before reading.
         self.wait_rtc_sync();
 
@@ -127,8 +120,6 @@ where
             // If values changed while reading, resync and retry.
             self.wait_rtc_sync();
         }
-
-        self.led.set_low().ok(); // indicate RTC read end
 
         let second = tr.st().bits() * 10 + tr.su().bits();
         let minute = tr.mnt().bits() * 10 + tr.mnu().bits();
@@ -156,7 +147,7 @@ where
         })
     }
 
-    fn enable_1hz_exti(&mut self) -> Result<(), ()> {
+    fn enable_1hz_int(&mut self) -> Result<(), ()> {
         unimplemented!("Internal RTC: EXTI output not implemented");
     }
 }

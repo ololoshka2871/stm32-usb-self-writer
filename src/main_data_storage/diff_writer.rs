@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use freertos_rust::{Duration, FreeRtosError, Mutex};
 use self_recorder_packet::DataBlockPacker;
 
@@ -24,23 +25,50 @@ pub struct FlashDiffWriter {
 }
 
 pub struct DataBlock {
-    packer: DataBlockPacker,
-    counter: usize,
+    page_number: u32,
+    page_size: usize,
+    timestamp: u64,
+    f_ref: f32,
+    base_interval_ms: u32,
+    interleave_ratio: [u32; 2],
+    targets: [u32; 2],
+    t_cpu: f32,
+    v_bat: f32,
+
+    samples: Vec<i32>,
+    max_samples: usize,
+
     dest_page: u32,
     prevs: [u32; 2],
 }
 
 impl DataPage for DataBlock {
     fn write_header(&mut self, output: &OutputStorage) {
-        let h = &mut self.packer.header;
+        self.targets = output.targets;
+        self.t_cpu = output.t_cpu;
+        self.v_bat = output.vbat;
 
-        h.targets = output.targets;
-        h.t_cpu = output.t_cpu;
-        h.v_bat = output.vbat;
+        let h = self_recorder_packet::DataPacketHeader {
+            prev_block_id: self.page_number.checked_sub(1).unwrap_or_default(),
+            this_block_id: self.page_number,
+
+            timestamp: self.timestamp,
+            f_ref: self.f_ref,
+            targets: self.targets,
+
+            base_interval_ms: self.base_interval_ms,
+            interleave_ratio: self.interleave_ratio,
+
+            t_cpu: self.t_cpu,
+            v_bat: self.v_bat,
+
+            data_len: 0,
+            data_crc32: 0,
+        };
 
         defmt::debug!(
             "{}",
-            crate::main_data_storage::header_printer::HeaderPrinter(h)
+            crate::main_data_storage::header_printer::HeaderPrinter(&h)
         );
     }
 
@@ -55,13 +83,8 @@ impl DataPage for DataBlock {
         } else {
             0
         };
-        self.counter += 1;
-        match self.packer.push_val(v) {
-            self_recorder_packet::PushResult::Success => false,
-            self_recorder_packet::PushResult::Full => true,
-            self_recorder_packet::PushResult::Overflow => false,
-            self_recorder_packet::PushResult::Finished => unreachable!(),
-        }
+        self.samples.push(v);
+        self.samples.len() >= self.max_samples
     }
 
     fn finalise(&mut self) {
@@ -112,21 +135,24 @@ impl WriteController<DataBlock> for FlashDiffWriter {
                     _ => unreachable!(),
                 };
 
-            let packer = DataBlockPacker::builder()
-                .set_ids(page_number.checked_sub(1).unwrap_or_default(), page_number)
-                .set_size(crate::main_data_storage::flash_page_size() as usize)
-                .set_timestamp(
-                    /*self.master_counter_info.uptime_ms()*/
-                    crate::rtc::rtc_get_time().to_timestamp_ms(),
-                )
-                .set_fref(self.fref_mul * fref as f32)
-                .set_write_cfg(base_interval_ms, interleave_ratio)
-                .build();
+            let page_size = crate::main_data_storage::flash_page_size() as usize;
+            let header_size = core::mem::size_of::<self_recorder_packet::DataPacketHeader>();
+            let max_samples = (page_size.saturating_sub(header_size + 128) / core::mem::size_of::<i32>())
+                .max(1);
 
             let res = DataBlock {
-                packer,
+                page_number,
+                page_size,
+                timestamp: crate::rtc::rtc_get_time().to_timestamp_ms(),
+                f_ref: self.fref_mul * fref as f32,
+                base_interval_ms,
+                interleave_ratio,
+                targets: [0; 2],
+                t_cpu: 0.0,
+                v_bat: 0.0,
+                samples: Vec::with_capacity(max_samples),
+                max_samples,
                 dest_page: self.next_page_number,
-                counter: 0,
                 prevs: [0, 0],
             };
 
@@ -140,11 +166,35 @@ impl WriteController<DataBlock> for FlashDiffWriter {
     }
 
     fn write(&mut self, page: DataBlock) -> write_controller::PageWriteResult {
-        let id = page.packer.header.this_block_id;
-        let input_count = page.counter;
+        let id = page.page_number;
+        let input_count = page.samples.len();
+
+        let mut packer = DataBlockPacker::builder()
+            .set_ids(page.page_number.checked_sub(1).unwrap_or_default(), page.page_number)
+            .set_size(page.page_size)
+            .set_timestamp(page.timestamp)
+            .set_fref(page.f_ref)
+            .set_write_cfg(page.base_interval_ms, page.interleave_ratio)
+            .set_targets(page.targets)
+            .set_tcpu(page.t_cpu)
+            .set_vbat(page.v_bat)
+            .build();
+
+        for sample in page.samples.iter().copied() {
+            match packer.push_val(sample) {
+                self_recorder_packet::PushResult::Success => {}
+                self_recorder_packet::PushResult::Full => break,
+                self_recorder_packet::PushResult::Overflow => {
+                    defmt::error!("Page {} compression overflow", id);
+                    self.page_aqured = false;
+                    return write_controller::PageWriteResult::Fail(id);
+                }
+                self_recorder_packet::PushResult::Finished => break,
+            }
+        }
 
         self.page_aqured = false;
-        if let Some(data) = page.packer.to_result_full(|data| {
+        if let Some(data) = packer.to_result_full(|data| {
             self.crc_calc
                 .lock(Duration::infinite())
                 .map(|mut crc_guard| {

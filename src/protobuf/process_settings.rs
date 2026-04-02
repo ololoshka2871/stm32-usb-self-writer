@@ -377,6 +377,19 @@ pub fn update_settings(
             store_coeff!(ws.writeConfig.BaseInterval_ms <= set_write_config; base_interval_ms; need_write);
             store_coeff!(ws.writeConfig.PWriteDevider <= set_write_config; p_write_devider; need_write);
             store_coeff!(ws.writeConfig.TWriteDevider <= set_write_config; t_write_devider; need_write);
+
+            if ws.writeConfig.BaseInterval_ms == 0 {
+                ws.writeConfig.BaseInterval_ms = 1;
+                need_write = true;
+            }
+            if ws.writeConfig.PWriteDevider == 0 {
+                ws.writeConfig.PWriteDevider = 1;
+                need_write = true;
+            }
+            if ws.writeConfig.TWriteDevider == 0 {
+                ws.writeConfig.TWriteDevider = 1;
+                need_write = true;
+            }
         }
 
         store_coeff!(ws.startDelay <= w; set_start_delay; need_write);

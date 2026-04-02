@@ -86,6 +86,7 @@ freqmeter-start-stop = []
 led-blink = []
 led-blink-each-block = ["led-blink"]
 flash-sleep = []
+rtc-jitter-debug = []
 
 no-flash = [] # only for debug 
 maket = []

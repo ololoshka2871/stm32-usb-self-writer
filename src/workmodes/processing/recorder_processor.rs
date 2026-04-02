@@ -18,6 +18,7 @@ use super::RawValueProcessor;
 
 #[derive(Copy, Clone)]
 pub struct FChCfg {
+    pub base_interval_ms: u32,
     pub p_preheat_time_ms: u32,
     pub t_preheat_time_ms: u32,
     pub p_write_period_ms: u32,
@@ -40,6 +41,14 @@ pub struct RecorderProcessor {
 }
 
 impl RecorderProcessor {
+    fn ceil_div_u32(value: u32, div: u32) -> u32 {
+        if div == 0 {
+            0
+        } else {
+            (value + div - 1) / div
+        }
+    }
+
     pub fn new(
         output: Arc<Mutex<OutputStorage>>,
         cq: Arc<Queue<Command>>,
@@ -64,14 +73,19 @@ impl RecorderProcessor {
                         .to_ms()
                 };
 
+                let base_interval_ms = core::cmp::max(ws.writeConfig.BaseInterval_ms, 1);
+                let p_write_div = core::cmp::max(ws.writeConfig.PWriteDevider, 1);
+                let t_write_div = core::cmp::max(ws.writeConfig.TWriteDevider, 1);
+
                 Ok(FChCfg {
-                    p_preheat_time_ms: preheat_time_ms(ws.PMesureTime_ms),
-                    t_preheat_time_ms: preheat_time_ms(ws.TMesureTime_ms),
+                    base_interval_ms,
+                    p_preheat_time_ms: preheat_time_ms(base_interval_ms),
+                    t_preheat_time_ms: preheat_time_ms(base_interval_ms),
                     p_write_period_ms: sysclk
-                        .duration_ms(ws.writeConfig.BaseInterval_ms * ws.writeConfig.PWriteDevider)
+                        .duration_ms(base_interval_ms.saturating_mul(p_write_div))
                         .to_ms(),
                     t_write_period_ms: sysclk
-                        .duration_ms(ws.writeConfig.BaseInterval_ms * ws.writeConfig.TWriteDevider)
+                        .duration_ms(base_interval_ms.saturating_mul(t_write_div))
                         .to_ms(),
                     p_en: ws.P_enabled,
                     t_en: ws.T_enabled,
@@ -183,6 +197,7 @@ impl RecorderProcessor {
 
         impl ToWriteCounter {
             fn channel_heated(write_period_ms: u32, preheat_time_ms: u32, enabled: bool) -> Self {
+                let write_period_ms = core::cmp::max(write_period_ms, 1);
                 Self {
                     write_period_ms,
                     preheat_time_ms,
@@ -207,30 +222,6 @@ impl RecorderProcessor {
                     odd
                 } else {
                     self.write_period_ms - odd
-                }
-            }
-
-            /// Возврещает количество милисекунд, которые можно поспать до момента когда надо будет
-            /// прогреть канал или снять измерения
-            fn to_next_event(&self) -> u32 {
-                if self.ch_enabled {
-                    let to_write = self.to_write();
-                    match (&self.mode, &self.cur_state) {
-                        (ToWriteCounterMode::HeatMeasureStop, CurrentChState::Ready)
-                        | (ToWriteCounterMode::HeatMeasureStop, CurrentChState::Heating) => {
-                            to_write
-                        }
-                        (ToWriteCounterMode::HeatMeasureStop, CurrentChState::Sleeping) => {
-                            if to_write >= self.preheat_time_ms {
-                                to_write - self.preheat_time_ms
-                            } else {
-                                to_write
-                            }
-                        }
-                        (ToWriteCounterMode::MeasureOnly, _) => to_write,
-                    }
-                } else {
-                    freertos_rust::FreeRtosTickType::MAX
                 }
             }
 
@@ -276,32 +267,98 @@ impl RecorderProcessor {
             }
         }
 
+        #[cfg(feature = "rtc-jitter-debug")]
+        struct RtcSyncStats {
+            samples: u32,
+            jitter_sum_ms: u64,
+            max_jitter_ms: u32,
+            max_exec_ms: u32,
+            overruns: u32,
+        }
+
+        #[cfg(feature = "rtc-jitter-debug")]
+        impl RtcSyncStats {
+            fn new() -> Self {
+                Self {
+                    samples: 0,
+                    jitter_sum_ms: 0,
+                    max_jitter_ms: 0,
+                    max_exec_ms: 0,
+                    overruns: 0,
+                }
+            }
+
+            fn on_tick(&mut self, observed_period_ms: u32, expected_period_ms: u32) {
+                let jitter = observed_period_ms.abs_diff(expected_period_ms);
+                self.samples = self.samples.saturating_add(1);
+                self.jitter_sum_ms = self.jitter_sum_ms.saturating_add(jitter as u64);
+                self.max_jitter_ms = core::cmp::max(self.max_jitter_ms, jitter);
+            }
+
+            fn on_exec_done(&mut self, exec_ms: u32, expected_period_ms: u32) {
+                self.max_exec_ms = core::cmp::max(self.max_exec_ms, exec_ms);
+                if exec_ms > expected_period_ms {
+                    self.overruns = self.overruns.saturating_add(1);
+                }
+            }
+
+            fn maybe_log_and_reset(&mut self, expected_period_ms: u32) {
+                const LOG_EVERY_SAMPLES: u32 = 256;
+                if self.samples >= LOG_EVERY_SAMPLES {
+                    let avg_jitter_ms = if self.samples > 0 {
+                        (self.jitter_sum_ms / self.samples as u64) as u32
+                    } else {
+                        0
+                    };
+
+                    defmt::info!(
+                        "RTC sync stats: base={}ms avg_jitter={}ms max_jitter={}ms max_exec={}ms overruns={}",
+                        expected_period_ms,
+                        avg_jitter_ms,
+                        self.max_jitter_ms,
+                        self.max_exec_ms,
+                        self.overruns
+                    );
+
+                    self.samples = 0;
+                    self.jitter_sum_ms = 0;
+                    self.max_jitter_ms = 0;
+                    self.max_exec_ms = 0;
+                    self.overruns = 0;
+                }
+            }
+        }
+
         let adaptate_req = move |req| {
             let _ = adaptate_f.lock(Duration::infinite()).map(|mut g| *g = req);
         };
 
         let send_cc = |cmd| {
-            let _ = commad_queue.send(cmd, Duration::infinite());
+            commad_queue.send(cmd, Duration::zero()).is_ok()
         };
 
         let enable_p_channel = |enabled| {
             if enabled {
-                send_cc(Command::Start(Channel::FChannel(FChannel::Pressure), 0));
+                send_cc(Command::Start(Channel::FChannel(FChannel::Pressure), 0))
+            } else {
+                true
             }
         };
 
         let enable_t_channel = |enabled| {
             if enabled {
-                send_cc(Command::Start(Channel::FChannel(FChannel::Temperature), 0));
+                send_cc(Command::Start(Channel::FChannel(FChannel::Temperature), 0))
+            } else {
+                true
             }
         };
 
         let start_analog_channels = |tcpu_en, vbat_en| {
             if tcpu_en {
-                send_cc(Command::Start(Channel::AChannel(AChannel::TCPU), 0));
+                let _ = send_cc(Command::Start(Channel::AChannel(AChannel::TCPU), 0));
             }
             if vbat_en {
-                send_cc(Command::Start(Channel::AChannel(AChannel::Vbat), 0));
+                let _ = send_cc(Command::Start(Channel::AChannel(AChannel::Vbat), 0));
             }
         };
 
@@ -327,8 +384,9 @@ impl RecorderProcessor {
             match waiter.is_event() {
                 // Начать прогрев канала
                 Some(Event::Preheat) => {
-                    send_cc(Command::Start(Channel::FChannel(ch), 0));
-                    waiter.accept_state(CurrentChState::Heating);
+                    if send_cc(Command::Start(Channel::FChannel(ch), 0)) {
+                        waiter.accept_state(CurrentChState::Heating);
+                    }
                 }
                 // Только записать измерения
                 Some(Event::Measure) => {
@@ -355,41 +413,53 @@ impl RecorderProcessor {
                         waiter.accept_state(CurrentChState::Ready);
                         return true;
                     }
-                    send_cc(Command::Stop(Channel::FChannel(ch)));
-                    waiter.accept_state(CurrentChState::Sleeping);
+                    if send_cc(Command::Stop(Channel::FChannel(ch))) {
+                        waiter.accept_state(CurrentChState::Sleeping);
+                    }
                 }
                 None => {}
             }
             return false;
         };
 
-        //1. Включаем частотыне каналы
-        adaptate_req(true);
-        if ch_cfg.p_preheat_time_ms != ch_cfg.t_preheat_time_ms {
-            if ch_cfg.p_preheat_time_ms < ch_cfg.t_preheat_time_ms {
-                enable_t_channel(ch_cfg.t_en);
-                CurrentTask::delay(Duration::ms(
-                    ch_cfg.t_preheat_time_ms - ch_cfg.p_preheat_time_ms,
-                ));
-                enable_p_channel(ch_cfg.p_en);
-                CurrentTask::delay(Duration::ms(ch_cfg.p_preheat_time_ms));
-            } else {
-                enable_p_channel(ch_cfg.p_en);
-                CurrentTask::delay(Duration::ms(
-                    ch_cfg.p_preheat_time_ms - ch_cfg.t_preheat_time_ms,
-                ));
-                enable_t_channel(ch_cfg.t_en);
-                CurrentTask::delay(Duration::ms(ch_cfg.t_preheat_time_ms));
-            }
-        } else {
-            enable_p_channel(ch_cfg.p_en);
-            enable_t_channel(ch_cfg.t_en);
-            // 2 - по тому, что каналы включаются синхронно (там delay)
-            CurrentTask::delay(Duration::ms(2 * ch_cfg.p_preheat_time_ms));
+        if crate::rtc::rtc_set_alarm_periodic(ch_cfg.base_interval_ms).is_err() {
+            defmt::warn!(
+                "RTC periodic alarm setup failed, fallback to task delay {} ms",
+                ch_cfg.base_interval_ms
+            );
         }
+
+        // Нулевая фаза: ждём первую границу RTC-тика, после которой все стартовые
+        // команды каналов отправляются строго по тикам.
+        if crate::rtc::rtc_wait_periodic_tick().is_err() {
+            CurrentTask::delay(Duration::ms(ch_cfg.base_interval_ms));
+        }
+
+        // 1. Включаем частотные каналы в фазе RTC и ждём прогрев тоже по фазе RTC
+        adaptate_req(true);
+
+        let p_preheat_ticks = Self::ceil_div_u32(ch_cfg.p_preheat_time_ms, ch_cfg.base_interval_ms);
+        let t_preheat_ticks = Self::ceil_div_u32(ch_cfg.t_preheat_time_ms, ch_cfg.base_interval_ms);
+        let warmup_ticks = core::cmp::max(p_preheat_ticks, t_preheat_ticks);
+
+        for tick_idx in 0..warmup_ticks {
+            if ch_cfg.p_en && tick_idx == warmup_ticks.saturating_sub(p_preheat_ticks) {
+                let _ = enable_p_channel(true);
+            }
+            if ch_cfg.t_en && tick_idx == warmup_ticks.saturating_sub(t_preheat_ticks) {
+                let _ = enable_t_channel(true);
+            }
+
+            if crate::rtc::rtc_wait_periodic_tick().is_err() {
+                CurrentTask::delay(Duration::ms(ch_cfg.base_interval_ms));
+            }
+        }
+
         adaptate_req(false);
 
         let mut series_page_counter = 0;
+        #[cfg(feature = "rtc-jitter-debug")]
+        let mut rtc_sync_stats = RtcSyncStats::new();
 
         loop {
             // 2. Частотыне каналы прогреты, включаем аналоговые
@@ -462,33 +532,44 @@ impl RecorderProcessor {
             );
 
             loop {
-                let to_next_event =
-                    core::cmp::min(to_p_write_.to_next_event(), to_t_write_.to_next_event());
-
-                if to_next_event > 0 {
-                    defmt::trace!("{} ms sleep to next event", to_next_event);
-                    CurrentTask::delay(Duration::ms(to_next_event));
-
-                    to_p_write_.tick(to_next_event);
-                    to_t_write_.tick(to_next_event);
+                #[cfg(feature = "rtc-jitter-debug")]
+                let wait_started_at = freertos_rust::FreeRtosUtils::get_tick_count();
+                if crate::rtc::rtc_wait_periodic_tick().is_err() {
+                    CurrentTask::delay(Duration::ms(ch_cfg.base_interval_ms));
                 }
+                #[cfg(feature = "rtc-jitter-debug")]
+                let wait_finished_at = freertos_rust::FreeRtosUtils::get_tick_count();
+                #[cfg(feature = "rtc-jitter-debug")]
+                let observed_period_ms = wait_finished_at.abs_diff(wait_started_at);
+                #[cfg(feature = "rtc-jitter-debug")]
+                rtc_sync_stats.on_tick(observed_period_ms, ch_cfg.base_interval_ms);
+
+                to_p_write_.tick(ch_cfg.base_interval_ms);
+                to_t_write_.tick(ch_cfg.base_interval_ms);
 
                 let start_moment = freertos_rust::FreeRtosUtils::get_tick_count();
                 if process_sensor_event(&mut to_p_write_, &mut page, FChannel::Pressure) {
-                    enable_t_channel(ch_cfg.t_en);
+                    let _ = enable_t_channel(ch_cfg.t_en);
                     break;
                 }
                 if process_sensor_event(&mut to_t_write_, &mut page, FChannel::Temperature) {
-                    enable_p_channel(ch_cfg.p_en);
+                    let _ = enable_p_channel(ch_cfg.p_en);
                     break;
                 }
                 let end_moment = freertos_rust::FreeRtosUtils::get_tick_count();
 
-                // Подвигаем счетчики, чтобы предотвратить цыклическое выполнение одинаковых действий
-                let done = core::cmp::max(end_moment.abs_diff(start_moment), 1);
-                CurrentTask::delay(Duration::ms(done));
-                to_p_write_.tick(done);
-                to_t_write_.tick(done);
+                let done = end_moment.abs_diff(start_moment);
+                #[cfg(feature = "rtc-jitter-debug")]
+                rtc_sync_stats.on_exec_done(done, ch_cfg.base_interval_ms);
+                if done > ch_cfg.base_interval_ms {
+                    defmt::warn!(
+                        "Recorder loop overrun: {} ms > base interval {} ms",
+                        done,
+                        ch_cfg.base_interval_ms
+                    );
+                }
+                #[cfg(feature = "rtc-jitter-debug")]
+                rtc_sync_stats.maybe_log_and_reset(ch_cfg.base_interval_ms);
             }
 
             // 5. Финализация

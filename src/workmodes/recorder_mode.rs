@@ -20,6 +20,10 @@ use stm32l4xx_hal::gpio::{
 
 #[allow(unused_imports)]
 use crate::{
+    main_data_storage::{
+        data_page::DataPage,
+        write_controller::{PageWriteResult, WriteController},
+    },
     sensors::freqmeter::master_counter,
     support::{interrupt_controller::IInterruptController, InterruptController},
     threads::{self, free_rtos_delay::FreeRtosDelay},
@@ -32,6 +36,44 @@ const APB1_DEVIDER: u32 = 1;
 const APB2_DEVIDER: u32 = 1;
 
 struct RecorderClockConfigProvider;
+
+#[cfg(feature = "no-flash")]
+struct NullDataPage {
+    page_number: u32,
+    samples: usize,
+}
+
+#[cfg(feature = "no-flash")]
+impl DataPage for NullDataPage {
+    fn write_header(&mut self, _output: &OutputStorage) {}
+
+    fn push_data(&mut self, _result: Option<u32>, _channel: crate::threads::sensor_processor::FChannel) -> bool {
+        self.samples += 1;
+        self.samples >= 512
+    }
+
+    fn finalise(&mut self) {}
+}
+
+#[cfg(feature = "no-flash")]
+struct NullWriteController;
+
+#[cfg(feature = "no-flash")]
+impl WriteController<NullDataPage> for NullWriteController {
+    fn try_create_new_page(
+        &mut self,
+        page_number: u32,
+    ) -> Result<NullDataPage, freertos_rust::FreeRtosError> {
+        Ok(NullDataPage {
+            page_number,
+            samples: 0,
+        })
+    }
+
+    fn write(&mut self, page: NullDataPage) -> PageWriteResult {
+        PageWriteResult::Succes(page.page_number)
+    }
+}
 
 impl ClockConfigProvider for RecorderClockConfigProvider {
     fn core_frequency() -> Hertz {
@@ -528,7 +570,7 @@ impl WorkMode<RecorderMode> for RecorderMode {
 
             tp1,
 
-            sensor_command_queue: Arc::new(freertos_rust::Queue::new(40).unwrap()),
+            sensor_command_queue: Arc::new(freertos_rust::Queue::new(64).unwrap()),
         }
     }
 
@@ -599,20 +641,17 @@ impl WorkMode<RecorderMode> for RecorderMode {
                 self.i2c3.take(),
                 self.clocks.take(),
             );
-            crate::workmodes::common::init_rtc_with(
-                move || {
-                    use crate::workmodes::common::new_i2c_config;
-                    use stm32l4xx_hal::i2c::I2c;
+            crate::workmodes::common::init_rtc_with(move || {
+                use crate::workmodes::common::new_i2c_config;
+                use stm32l4xx_hal::i2c::I2c;
 
-                    if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = pins {
-                        let config = new_i2c_config(clocks);
-                        Ok(I2c::i2c3(i2c_per, (scl, sda), config, apb1r1))
-                    } else {
-                        Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
-                    }
-                },
-                self.tp1,
-            )?;
+                if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = pins {
+                    let config = new_i2c_config(clocks);
+                    Ok(I2c::i2c3(i2c_per, (scl, sda), config, apb1r1))
+                } else {
+                    Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
+                }
+            })?;
         }
 
         let time = crate::rtc::rtc_get_time();
@@ -656,53 +695,54 @@ impl WorkMode<RecorderMode> for RecorderMode {
             adc.set_sample_time(SampleTime::Cycles640_5);
             adc.set_resolution(Resolution::Bits12);
 
+            let tcpu_ch = adc.enable_temperature(&mut delay);
+            let v_ref = adc.enable_vref(&mut delay);
+            let sp = threads::sensor_processor::SensorPerith {
+                timer1: self.timer1,
+                timer1_dma_ch: self.dma1_ch6,
+                timer1_pin: self.in_p,
+                en_1: self.en_p,
+
+                timer2: self.timer2,
+                timer2_dma_ch: self.dma1_ch2,
+                timer2_pin: self.in_t,
+                en_2: self.en_t,
+
+                vbat_pin: self.vbat_pin,
+                tcpu_ch: tcpu_ch,
+                v_ref: v_ref,
+
+                adc: adc,
+            };
+            let cq = self.sensor_command_queue.clone();
+            let ic = self.interrupt_controller.clone();
+            let mut processor = RecorderProcessor::new(
+                output.clone(),
+                self.sensor_command_queue.clone(),
+                RecorderClockConfigProvider::xtal2master_freq_multiplier(),
+                sys_clk,
+            );
+
             #[cfg(not(feature = "no-flash"))]
-            {
-                let tcpu_ch = adc.enable_temperature(&mut delay);
-                let v_ref = adc.enable_vref(&mut delay);
-                let sp = threads::sensor_processor::SensorPerith {
-                    timer1: self.timer1,
-                    timer1_dma_ch: self.dma1_ch6,
-                    timer1_pin: self.in_p,
-                    en_1: self.en_p,
+            processor.start(
+                self.scb,
+                crate::main_data_storage::diff_writer::FlashDiffWriter::new(
+                    RecorderClockConfigProvider::xtal2master_freq_multiplier() as f32,
+                    self.crc.clone(),
+                ),
+                self.led_pin,
+            )?;
 
-                    timer2: self.timer2,
-                    timer2_dma_ch: self.dma1_ch2,
-                    timer2_pin: self.in_t,
-                    en_2: self.en_t,
+            #[cfg(feature = "no-flash")]
+            processor.start(self.scb, NullWriteController, self.led_pin)?;
 
-                    vbat_pin: self.vbat_pin,
-                    tcpu_ch: tcpu_ch,
-                    v_ref: v_ref,
-
-                    adc: adc,
-                };
-                let cq = self.sensor_command_queue.clone();
-                let ic = self.interrupt_controller.clone();
-                let mut processor = RecorderProcessor::new(
-                    output.clone(),
-                    self.sensor_command_queue.clone(),
-                    RecorderClockConfigProvider::xtal2master_freq_multiplier(),
-                    sys_clk,
-                );
-
-                processor.start(
-                    self.scb,
-                    crate::main_data_storage::diff_writer::FlashDiffWriter::new(
-                        RecorderClockConfigProvider::xtal2master_freq_multiplier() as f32,
-                        self.crc.clone(),
-                    ),
-                    self.led_pin,
-                )?;
-
-                Task::new()
-                    .name("SensProc")
-                    .stack_size(1024)
-                    .priority(TaskPriority(crate::config::SENS_PROC_TASK_PRIO))
-                    .start(move |_| {
-                        threads::sensor_processor::sensor_processor(sp, cq, ic, processor, sys_clk)
-                    })?;
-            }
+            Task::new()
+                .name("SensProc")
+                .stack_size(1024)
+                .priority(TaskPriority(crate::config::SENS_PROC_TASK_PRIO))
+                .start(move |_| {
+                    threads::sensor_processor::sensor_processor(sp, cq, ic, processor, sys_clk)
+                })?;
         }
         // --------------------------------------------------------------------
 

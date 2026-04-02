@@ -29,4 +29,4 @@ jobs:
 
       - name: Build
         run: |
-          cargo build --release
+          cargo build --release --features=xtal-24mhz

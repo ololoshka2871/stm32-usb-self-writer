@@ -386,20 +386,17 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 self.i2c3.take(),
                 self.clocks.take(),
             );
-            crate::workmodes::common::init_rtc_with(
-                move || {
-                    use crate::workmodes::common::new_i2c_config;
-                    use stm32l4xx_hal::i2c::I2c;
+            crate::workmodes::common::init_rtc_with(move || {
+                use crate::workmodes::common::new_i2c_config;
+                use stm32l4xx_hal::i2c::I2c;
 
-                    if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = pins {
-                        let config = new_i2c_config(clocks);
-                        Ok(I2c::i2c3(i2c_per, (scl, sda), config, apb1r1))
-                    } else {
-                        Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
-                    }
-                },
-                self.tp1,
-            )?;
+                if let (Some(scl), Some(sda), Some(i2c_per), Some(clocks)) = pins {
+                    let config = new_i2c_config(clocks);
+                    Ok(I2c::i2c3(i2c_per, (scl, sda), config, apb1r1))
+                } else {
+                    Err(freertos_rust::FreeRtosError::ProcessorHasShutDown)
+                }
+            })?;
         }
 
         let time = crate::rtc::rtc_get_time();

@@ -147,17 +147,16 @@ where
 ///
 /// The closure should attempt to construct and return an I2C peripheral
 /// (`Ok(i2c)`) or `Err(E)` if construction is not possible.
-pub fn init_rtc_with<I2C, L, F, E>(make_i2c: F, led: L) -> Result<(), freertos_rust::FreeRtosError>
+pub fn init_rtc_with<I2C, F, E>(make_i2c: F) -> Result<(), freertos_rust::FreeRtosError>
 where
     F: FnOnce() -> Result<I2C, freertos_rust::FreeRtosError>,
     I2C: embedded_hal::blocking::i2c::WriteRead<Error = E>
         + embedded_hal::blocking::i2c::Write<Error = E>
         + 'static,
-    L: embedded_hal::digital::v2::OutputPin + 'static,
 {
     match make_i2c() {
         Ok(i2c) => {
-            crate::rtc::init(i2c, led);
+            crate::rtc::init(i2c);
             Ok(())
         }
         Err(e) => {

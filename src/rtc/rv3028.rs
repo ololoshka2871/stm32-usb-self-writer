@@ -53,7 +53,7 @@ where
         })
     }
 
-    fn enable_1hz_exti(&mut self) -> Result<(), ()> {
+    fn enable_1hz_int(&mut self) -> Result<(), ()> {
         // RV-3028: Control 2 (0x37), set bit 3 (CLKOUT enable)
         // CLKOUT freq: CLKOUT register (0x35), set to 0b0000_0001 for 1Hz
         // 1. Set 1Hz in CLKOUT

@@ -51,7 +51,7 @@ where
         })
     }
 
-    fn enable_1hz_exti(&mut self) -> Result<(), ()> {
+    fn enable_1hz_int(&mut self) -> Result<(), ()> {
         // RX8130: Control register 0x0F, OUT bit (bit 3), FOUT register 0x17
         // 1. Set FOUT to 1Hz (0x10)
         self.i2c.write(RX8130_I2C_ADDR, &[0x17, 0x10]).map_err(|_| ())?;
