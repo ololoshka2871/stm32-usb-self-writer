@@ -1,7 +1,10 @@
 use core::{cmp::max, ops::DerefMut};
 
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
-use freertos_rust::{CurrentTask, Duration, FreeRtosError, Mutex, Queue, Task, TaskPriority};
+use freertos_rust::{
+    CurrentTask, Duration, FreeRtosError, Mutex, Queue, Task, TaskNotification, TaskPriority,
+};
 use stm32l4xx_hal::{adc::ADC, prelude::OutputPin, time::Hertz};
 
 use crate::{
@@ -105,8 +108,8 @@ impl RecorderProcessor {
     ) -> Result<Task, FreeRtosError>
     where
         P: 'static + OutputPin + Send,
-        W: 'static + WriteController<D>,
-        D: 'static + DataPage,
+        W: 'static + WriteController<D> + Clone,
+        D: 'static + DataPage + Send + Sync,
     {
         use crate::config;
 
@@ -157,10 +160,12 @@ impl RecorderProcessor {
         mut scb: cortex_m::peripheral::SCB,
         mut _led: P,
     ) where
-        W: WriteController<D>,
-        D: DataPage,
+        W: WriteController<D> + Clone + 'static,
+        D: DataPage + Send + Sync + 'static,
         P: OutputPin,
     {
+        const WRITE_BACKLOG_PAGES: usize = 3;
+
         enum Event {
             /// Приступить к прогреву канала
             Preheat,
@@ -457,6 +462,48 @@ impl RecorderProcessor {
 
         adaptate_req(false);
 
+        let writer_worker = writer.clone();
+        let write_queue = Arc::new(Mutex::new(VecDeque::<D>::new()).unwrap());
+        let write_queue_consumer = write_queue.clone();
+        let writer_task = Task::new()
+            .name("RecWrite")
+            .stack_size(1536)
+            .priority(TaskPriority(crate::config::FLASH_CLEANER_PRIO))
+            .start(move |_| {
+                let mut writer = writer_worker;
+                loop {
+                    let _ = unsafe { freertos_rust::Task::current().unwrap_unchecked() }
+                        .take_notification(true, Duration::infinite());
+
+                    loop {
+                        let page = if let Ok(mut guard) = write_queue_consumer.lock(Duration::infinite()) {
+                            guard.pop_front()
+                        } else {
+                            None
+                        };
+
+                        if let Some(page) = page {
+                            let start_moment = freertos_rust::FreeRtosUtils::get_tick_count();
+                            let write_res = writer.write(page);
+                            let write_time =
+                                freertos_rust::FreeRtosUtils::get_tick_count().abs_diff(start_moment);
+
+                            match write_res {
+                                PageWriteResult::Succes(n) => {
+                                    defmt::info!("Flash page {} writen ({} ms)", n, write_time);
+                                }
+                                PageWriteResult::Fail(e) => {
+                                    defmt::error!("Flash page write error: {}", e);
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
         let mut series_page_counter = 0;
         #[cfg(feature = "rtc-jitter-debug")]
         let mut rtc_sync_stats = RtcSyncStats::new();
@@ -575,31 +622,37 @@ impl RecorderProcessor {
             // 5. Финализация
             page.finalise();
 
-            // 6. Запрос адаптации
+            // 6. Запрос адаптации + постановка страницы в очередь записи
             adaptate_req(true);
 
-            let write_time = {
-                let start_moment = freertos_rust::FreeRtosUtils::get_tick_count();
-
-                let write_res = writer.write(page);
-
-                let end_moment = freertos_rust::FreeRtosUtils::get_tick_count();
-
-                let mut write_time = end_moment.abs_diff(start_moment);
-
-                // 7. Запись станицы
-                match write_res {
-                    PageWriteResult::Succes(n) => {
-                        defmt::info!("Flash page {} writen ({} ms)", n, write_time);
-                    }
-                    PageWriteResult::Fail(e) => {
-                        defmt::error!("Flash page write error: {}", e);
-                        write_time = 0;
+            let mut page_to_queue = Some(page);
+            let mut queue_full_warned = false;
+            loop {
+                let mut enqueued = false;
+                if let Ok(mut guard) = write_queue.lock(Duration::zero()) {
+                    if guard.len() < WRITE_BACKLOG_PAGES {
+                        guard.push_back(page_to_queue.take().unwrap());
+                        enqueued = true;
                     }
                 }
 
-                write_time
-            };
+                if enqueued {
+                    let _ = writer_task.notify(TaskNotification::Increment);
+                    break;
+                }
+
+                if !queue_full_warned {
+                    queue_full_warned = true;
+                    defmt::warn!(
+                        "Write queue full ({} pages), waiting for writer",
+                        WRITE_BACKLOG_PAGES
+                    );
+                }
+
+                if crate::rtc::rtc_wait_periodic_tick().is_err() {
+                    CurrentTask::delay(Duration::ms(ch_cfg.base_interval_ms));
+                }
+            }
 
             // 8. Ожидание завершения адаптации пропуская 1 измерение
 
@@ -610,8 +663,7 @@ impl RecorderProcessor {
                 (core::cmp::max(ch_cfg.p_preheat_time_ms, ch_cfg.t_preheat_time_ms)
                     / crate::config::PREHEAT_MULTIPLIER
                     + crate::config::MINIMUM_ADAPTATION_INTERVAL)
-                    .checked_sub(write_time)
-                    .unwrap_or_default(),
+                    .max(ch_cfg.base_interval_ms),
             ));
 
             #[cfg(feature = "led-blink-each-block")]

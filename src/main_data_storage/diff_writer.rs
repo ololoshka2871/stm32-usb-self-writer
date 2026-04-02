@@ -4,7 +4,6 @@ use freertos_rust::{Duration, FreeRtosError, Mutex};
 use self_recorder_packet::DataBlockPacker;
 
 use crate::{
-    sensors::freqmeter::master_counter::{MasterCounter, MasterTimerInfo},
     settings,
     threads::sensor_processor::FChannel,
     workmodes::output_storage::OutputStorage,
@@ -15,9 +14,8 @@ use super::{
     write_controller::{self, WriteController},
 };
 
+#[derive(Clone)]
 pub struct FlashDiffWriter {
-    #[allow(dead_code)]
-    master_counter_info: MasterTimerInfo,
     next_page_number: u32,
     crc_calc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>,
     fref_mul: f32,
@@ -94,11 +92,7 @@ impl DataPage for DataBlock {
 
 impl FlashDiffWriter {
     pub fn new(fref_mul: f32, crc_calc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>) -> Self {
-        let mut master_counter_info = MasterCounter::acquire();
-        master_counter_info.want_start();
-
         Self {
-            master_counter_info,
             next_page_number: 0,
             crc_calc,
             fref_mul: fref_mul,

@@ -56,6 +56,7 @@ impl DataPage for NullDataPage {
 }
 
 #[cfg(feature = "no-flash")]
+#[derive(Clone, Copy)]
 struct NullWriteController;
 
 #[cfg(feature = "no-flash")]
