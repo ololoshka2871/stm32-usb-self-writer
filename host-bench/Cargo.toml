@@ -1,0 +1,8 @@
+[package]
+name = "host-bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+self-recorder-packet = { git = "https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git", rev = "e25058f91e" }
+crc32fast = "1.5"

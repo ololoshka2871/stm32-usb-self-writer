@@ -108,7 +108,7 @@ mod app {
             &mut rcc.bdcr,
             &mut pwr.cr1,
         );
-        rtc.set_alarm_period_ms(125);
+        rtc.set_alarm_period_ms(20);
         defmt::info!(
             "\tRTC initialized, source: {}",
             defmt::Debug2Format(&rtc_clock_source)
@@ -140,6 +140,17 @@ mod app {
 
     //-------------------------------------------------------------------------
 
+    #[task(binds = RTC_WKUP, shared = [rtc], priority = 1)]
+    fn rtc_alarm(ctx: rtc_alarm::Context) {
+        let mut rtc = ctx.shared.rtc;
+        rtc.lock(|rtc| rtc.handle_alarm_interrupt());
+
+        let now = rtc.lock(|rtc| rtc.current_time());
+        defmt::info!("RTC Alarm! Current time: {}", now);
+    }
+
+    //-------------------------------------------------------------------------
+
     #[task(shared = [rtc], priority = 1)]
     async fn regular_test(ctx: regular_test::Context) {
         use rtic_monotonics::fugit::ExtU64;
@@ -153,14 +164,5 @@ mod app {
             defmt::info!("Hello from regular test task on {}!", now);
             Mono::delay(125u64.millis()).await;
         }
-    }
-
-    #[task(binds = RTC_WKUP, shared = [rtc], priority = 1)]
-    fn rtc_alarm(ctx: rtc_alarm::Context) {
-        let mut rtc = ctx.shared.rtc;
-        rtc.lock(|rtc| rtc.handle_alarm_interrupt());
-
-        let now = rtc.lock(|rtc| rtc.current_time());
-        defmt::info!("RTC Alarm! Current time: {}", now);
     }
 }
