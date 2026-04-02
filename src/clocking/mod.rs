@@ -1,6 +1,8 @@
 mod high_performance_clocking;
 mod recorder_clocking;
 
+pub mod rtc;
+
 pub use high_performance_clocking::{HighPerformanceClockConfigProvider, PllConfigProvider};
 pub use recorder_clocking::RecorderClockConfigProvider;
 

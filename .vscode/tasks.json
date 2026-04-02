@@ -25,7 +25,9 @@
             "label": "Cargo Build (release)",
             "type": "process",
             "command": "cargo",
-            "args": ["build", "--release"],
+            "args": [
+                "build", "--release", 
+                "--features", "\"maket,xtal-24mhz\""],
             "problemMatcher": [
                 "$rustc"
             ],

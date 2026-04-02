@@ -21,13 +21,17 @@ use rtic::app;
 use rtic_monotonics::{systick_monotonic, Monotonic};
 
 use stm32_usb_self_writer::{
-    clocking::{ClockConfigProvider, PllConfigProvider},
+    clocking::{rtc::RtcService, ClockConfigProvider, PllConfigProvider},
     config, is_usb_connected,
 };
 
-//---------------------------------------------------------------
+//-----------------------------------------------------------------------------
 
 systick_monotonic!(Mono, config::SYST_TIMER_HZ);
+
+//-----------------------------------------------------------------------------
+
+defmt::timestamp!("[{=u64:ms}]", Mono::now().ticks());
 
 //-----------------------------------------------------------------------------
 
@@ -35,12 +39,14 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 //-----------------------------------------------------------------------------
 
-#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RTC_ALARM, LCD])]
+#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
     use super::*;
 
     #[shared]
-    struct Shared {}
+    struct Shared {
+        rtc: RtcService,
+    }
 
     #[local]
     struct Local {
@@ -95,6 +101,19 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.sysclk().0);
         defmt::info!("\tSysTick");
 
+        let (mut rtc, rtc_clock_source) = RtcService::init(
+            ctx.device.RTC,
+            &mut ctx.device.EXTI,
+            &mut rcc.apb1r1,
+            &mut rcc.bdcr,
+            &mut pwr.cr1,
+        );
+        rtc.set_alarm_period_ms(1_000);
+        defmt::info!(
+            "\tRTC initialized, source: {}",
+            defmt::Debug2Format(&rtc_clock_source)
+        );
+
         let mut gpioa = ctx.device.GPIOA.split(&mut rcc.ahb2);
         let mut gpiob = ctx.device.GPIOB.split(&mut rcc.ahb2);
         let mut gpioc = ctx.device.GPIOC.split(&mut rcc.ahb2);
@@ -116,19 +135,29 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        (Shared {}, Local { led })
+        (Shared { rtc }, Local { led })
     }
 
     //-------------------------------------------------------------------------
 
-    #[task]
-    async fn regular_test(_ctx: regular_test::Context) {
+    #[task(shared = [rtc], priority = 1)]
+    async fn regular_test(ctx: regular_test::Context) {
         use rtic_monotonics::fugit::ExtU64;
+
+        let mut rtc = ctx.shared.rtc;
 
         defmt::info!("Regular test task");
         loop {
-            defmt::info!("Hello from regular test task!");
+            let now = rtc.lock(|rtc| rtc.current_time());
+
+            defmt::info!("Hello from regular test task on {}!", now);
             Mono::delay(125u64.millis()).await;
         }
+    }
+
+    #[task(binds = RTC_ALARM, shared = [rtc], priority = 1)]
+    fn rtc_alarm(ctx: rtc_alarm::Context) {
+        let mut rtc = ctx.shared.rtc;
+        rtc.lock(|rtc| rtc.handle_alarm_interrupt());
     }
 }
