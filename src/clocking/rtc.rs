@@ -1,10 +1,10 @@
-use serde::de;
 use stm32l4xx_hal::{
     datetime::{Date, Time, U32Ext},
-    pac::{self, PWR, RCC},
+    hal::timer::CountDown,
+    pac::{self},
     pwr,
     rcc::{APB1R1, BDCR},
-    rtc::{Alarm, Event, Rtc, RtcClockSource, RtcConfig},
+    rtc::{Event, Rtc, RtcClockSource, RtcConfig, RtcWakeupClockSource},
 };
 
 const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
@@ -41,7 +41,8 @@ impl defmt::Format for CurrentTime {
 
 pub struct RtcService {
     rtc: Rtc,
-    alarm_period_ms: Option<u32>,
+    rtc_clock_source: RtcClockSource,
+    wakeup_ticks: Option<u32>,
 }
 
 impl RtcService {
@@ -57,16 +58,18 @@ impl RtcService {
         let rtc_config = match source {
             RtcClockSource::LSE => RtcConfig::default()
                 .clock_config(RtcClockSource::LSE)
+                .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
                 .async_prescaler(31)
                 .sync_prescaler(1023),
             _ => RtcConfig::default()
                 .clock_config(RtcClockSource::LSI)
+                .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
                 .async_prescaler(31)
                 .sync_prescaler(999),
         };
 
         let mut rtc = Rtc::rtc(rtc, apb1r1, bdcr, pwrcr1, rtc_config);
-        rtc.listen(exti, Event::AlarmA);
+        rtc.listen(exti, Event::WakeupTimer);
 
         if rtc.read_backup_register(0) != Some(RTC_INIT_MARKER) {
             rtc.set_date_time(
@@ -79,15 +82,23 @@ impl RtcService {
         (
             Self {
                 rtc,
-                alarm_period_ms: None,
+                rtc_clock_source: source,
+                wakeup_ticks: None,
             },
             source,
         )
     }
 
     pub fn set_alarm_period_ms(&mut self, period_ms: u32) {
-        self.alarm_period_ms = Some(period_ms.max(1));
-        self.schedule_next_alarm();
+        let period_ms = period_ms.max(1);
+        let rtc_clock_hz = self.rtc_clock_hz();
+        let wakeup_clock_hz = rtc_clock_hz / 16;
+
+        let ticks = ((period_ms as u64 * wakeup_clock_hz as u64) + 999) / 1000;
+        let ticks = ticks.clamp(1, 65_536) as u32;
+
+        self.wakeup_ticks = Some(ticks);
+        self.restart_wakeup_timer();
     }
 
     pub fn current_time(&self) -> CurrentTime {
@@ -105,23 +116,28 @@ impl RtcService {
     }
 
     pub fn handle_alarm_interrupt(&mut self) -> bool {
-        if !self.rtc.check_interrupt(Event::AlarmA, true) {
+        if !self.rtc.check_interrupt(Event::WakeupTimer, true) {
             return false;
         }
 
-        self.schedule_next_alarm();
+        self.restart_wakeup_timer();
         true
     }
 
-    fn schedule_next_alarm(&mut self) {
-        let Some(period_ms) = self.alarm_period_ms else {
+    fn restart_wakeup_timer(&mut self) {
+        let Some(ticks) = self.wakeup_ticks else {
             return;
         };
 
-        let (date, time) = self.rtc.get_date_time();
-        let add_seconds = ((period_ms - 1) / 1_000) + 1;
-        let (next_date, next_time) = add_seconds_to_date_time(date, time, add_seconds);
-        self.rtc.set_alarm(Alarm::AlarmA, next_date, next_time);
+        self.rtc.wakeup_timer().start(ticks);
+    }
+
+    fn rtc_clock_hz(&self) -> u32 {
+        match self.rtc_clock_source {
+            RtcClockSource::LSE => 32_768,
+            RtcClockSource::LSI => 32_000,
+            _ => 32_000,
+        }
     }
 }
 
@@ -153,65 +169,4 @@ fn select_rtc_clock_source() -> RtcClockSource {
     RtcClockSource::LSI
 }
 
-fn add_seconds_to_date_time(mut date: Date, time: Time, seconds_to_add: u32) -> (Date, Time) {
-    let day_seconds = 24 * 60 * 60;
-    let total_seconds = time.hours * 3_600 + time.minutes * 60 + time.seconds + seconds_to_add;
-    let mut days_to_add = total_seconds / day_seconds;
-    let seconds_of_day = total_seconds % day_seconds;
 
-    let hours = seconds_of_day / 3_600;
-    let minutes = (seconds_of_day % 3_600) / 60;
-    let seconds = seconds_of_day % 60;
-
-    while days_to_add > 0 {
-        let dim = days_in_month(date.year, date.month);
-        if date.date < dim {
-            date.date += 1;
-        } else {
-            date.date = 1;
-            if date.month < 12 {
-                date.month += 1;
-            } else {
-                date.month = 1;
-                date.year += 1;
-            }
-        }
-        date.day = if date.day >= 7 { 1 } else { date.day + 1 };
-        days_to_add -= 1;
-    }
-
-    (
-        Date::new(
-            date.day.day(),
-            date.date.date(),
-            date.month.month(),
-            date.year.year(),
-        ),
-        Time::new(
-            hours.hours(),
-            minutes.minutes(),
-            seconds.seconds(),
-            0.micros(),
-            false,
-        ),
-    )
-}
-
-fn days_in_month(year: u32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if is_leap_year(year) {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
-}
-
-fn is_leap_year(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-}

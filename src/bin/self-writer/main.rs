@@ -108,7 +108,7 @@ mod app {
             &mut rcc.bdcr,
             &mut pwr.cr1,
         );
-        rtc.set_alarm_period_ms(1_000);
+        rtc.set_alarm_period_ms(125);
         defmt::info!(
             "\tRTC initialized, source: {}",
             defmt::Debug2Format(&rtc_clock_source)
@@ -129,7 +129,7 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        regular_test::spawn().expect("Failed to spawn regular test task");
+        //regular_test::spawn().expect("Failed to spawn regular test task");
 
         defmt::info!("Tasks spawned");
 
@@ -155,9 +155,12 @@ mod app {
         }
     }
 
-    #[task(binds = RTC_ALARM, shared = [rtc], priority = 1)]
+    #[task(binds = RTC_WKUP, shared = [rtc], priority = 1)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
         rtc.lock(|rtc| rtc.handle_alarm_interrupt());
+
+        let now = rtc.lock(|rtc| rtc.current_time());
+        defmt::info!("RTC Alarm! Current time: {}", now);
     }
 }
