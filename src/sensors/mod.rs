@@ -1,2 +1,2 @@
 pub mod analog;
-pub mod freqmeter;
+//pub mod freqmeter;

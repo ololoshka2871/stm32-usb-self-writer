@@ -1,67 +1,40 @@
-use cortex_m::prelude::_embedded_hal_adc_OneShot;
-use freertos_rust::{Duration, Timer};
-use stm32l4xx_hal::adc::{Channel, ADC};
+use cortex_m::{delay, prelude::*};
+use embedded_hal::blocking::delay::DelayUs;
+use stm32l4xx_hal::adc::{Channel, Resolution, SampleTime, Temperature, Vref, ADC};
 
-use crate::{
-    support::{new_freertos_timer, timer_period::TimerExt},
-    threads::sensor_processor::AChannel,
-};
-
-pub trait AController {
-    fn init_cycle(&mut self);
-    fn stop(&mut self);
-    fn set_period(&mut self, ticks: u32);
-    fn period(&self) -> u32;
-
-    fn read(&mut self, adc: &mut ADC) -> u16;
+pub struct AnalogSensor<BATTERY_PIN> {
+    adc: ADC,
+    tcpu_ch: Temperature,
+    v_ref: Vref,
+    vbat_pin: BATTERY_PIN,
 }
 
-pub struct AnalogChannel<ADCCH: Channel> {
-    timer: Timer,
-    adc_ch: ADCCH,
-    period: u32,
-}
+impl<BATTERY_PIN: Send + Channel> AnalogSensor<BATTERY_PIN> {
+    pub fn new(mut adc: ADC, vbat_pin: BATTERY_PIN, delay: &mut impl DelayUs<u32>) -> Self {
+        adc.set_sample_time(SampleTime::Cycles640_5);
+        adc.set_resolution(Resolution::Bits12);
 
-impl<ADCCH: Channel> AnalogChannel<ADCCH> {
-    pub fn new<F>(ch: AChannel, adc_ch: ADCCH, analog_ticks: u32, f: F) -> Self
-    where
-        F: Fn(u32) + Send + 'static,
-        ADCCH: Send,
-    {
-        let timer = new_freertos_timer(Duration::ticks(analog_ticks), ch.into(), move |timer| {
-            f(timer.period())
-        });
-        let _ = timer.stop(Duration::infinite());
+        let tcpu_ch = adc.enable_temperature(delay);
+        let v_ref = adc.enable_vref(delay);
 
         Self {
-            timer,
-            adc_ch,
-            period: analog_ticks,
+            adc,
+            tcpu_ch,
+            v_ref,
+            vbat_pin,
         }
     }
-}
 
-impl<ADCCH: Channel> AController for AnalogChannel<ADCCH> {
-    fn init_cycle(&mut self) {
-        let _ = self.timer.start(Duration::infinite());
-    }
+    pub fn read(&mut self) -> (f32, f32) {
+        self.adc.calibrate(&mut self.v_ref);
 
-    fn stop(&mut self) {
-        let _ = self.timer.stop(Duration::infinite());
-    }
+        let v = self.adc.read(&mut self.vbat_pin).unwrap_or(0);
+        let vbat_input_v = self.adc.to_millivolts(v) as f32 / 1000.0;
+        let vbat = vbat_input_v * (crate::config::VBAT_DEVIDER_R1 + crate::config::VBAT_DEVIDER_R2)
+            / crate::config::VBAT_DEVIDER_R2;
+        let v = self.adc.read(&mut self.tcpu_ch).unwrap_or(0);
+        let tcpu = self.adc.to_degrees_centigrade(v);
 
-    fn set_period(&mut self, ticks: u32) {
-        let _ = self
-            .timer
-            .change_period(Duration::infinite(), Duration::ticks(ticks));
-        self.period = ticks;
-    }
-
-    fn period(&self) -> u32 {
-        self.period
-    }
-
-    fn read(&mut self, adc: &mut ADC) -> u16 {
-        adc.read(&mut self.adc_ch).unwrap_or_default()
+        (vbat, tcpu)
     }
 }

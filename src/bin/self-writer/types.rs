@@ -36,7 +36,7 @@ impl PllConfigProvider for Pll {
 pub type HighPerformanceClockProvider = HighPerformanceClockConfigProvider<
     Pll,
     { config::XTAL_FREQ },
-    { config::SELF_WRITER_CPU_FREQ },
+    { config::HIGH_PERF_CPU_FREQ },
 >;
 pub type RecorderClockProvider =
     RecorderClockConfigProvider<{ config::XTAL_FREQ }, { config::SELF_WRITER_CPU_FREQ }>;

@@ -18,7 +18,7 @@ use stm32l4xx_hal::flash::FlashExt;
 use stm32l4xx_hal::prelude::*;
 
 use rtic::app;
-use rtic_monotonics::{systick_monotonic, Monotonic};
+use rtic_monotonics::{fugit::ExtU64, systick_monotonic, Monotonic};
 
 use stm32_usb_self_writer::{
     clocking::{rtc::RtcService, ClockConfigProvider, PllConfigProvider},
@@ -31,7 +31,10 @@ systick_monotonic!(Mono, config::SYST_TIMER_HZ);
 
 //-----------------------------------------------------------------------------
 
-defmt::timestamp!("[{=u64:ms}]", Mono::now().ticks());
+defmt::timestamp!(
+    "[T{=u64:ms}]",
+    Mono::now().ticks() * (1_000 / config::SYST_TIMER_HZ as u64)
+);
 
 //-----------------------------------------------------------------------------
 
@@ -51,6 +54,8 @@ mod app {
     #[local]
     struct Local {
         led: types::Led,
+
+        analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
     }
 
     #[init]
@@ -98,7 +103,7 @@ mod app {
         defmt::info!("\tHeap");
 
         // Initialize the systick interrupt & obtain the token to prove that we did
-        Mono::start(ctx.core.SYST, clocks.sysclk().0);
+        Mono::start(ctx.core.SYST, clocks.hclk().0);
         defmt::info!("\tSysTick");
 
         let (mut rtc, rtc_clock_source) = RtcService::init(
@@ -108,7 +113,7 @@ mod app {
             &mut rcc.bdcr,
             &mut pwr.cr1,
         );
-        rtc.set_alarm_period_ms(20);
+        rtc.set_alarm_period_ms(1_000);
         defmt::info!(
             "\tRTC initialized, source: {}",
             defmt::Debug2Format(&rtc_clock_source)
@@ -120,6 +125,25 @@ mod app {
         let mut gpiod = ctx.device.GPIOD.split(&mut rcc.ahb2);
         let mut gpioe = ctx.device.GPIOE.split(&mut rcc.ahb2);
 
+        let analog_sens = {
+            let mut delay = stm32_usb_self_writer::NOPDelay {
+                sys_clk: clocks.sysclk(),
+            };
+
+            let mut adc = stm32l4xx_hal::adc::ADC::new(
+                ctx.device.ADC1,
+                ctx.device.ADC_COMMON,
+                &mut rcc.ahb2,
+                &mut rcc.ccipr,
+                &mut delay,
+            );
+
+            let vbat_pin = gpioa.pa1.into_analog(&mut gpioa.moder, &mut gpioa.pupdr);
+
+            stm32_usb_self_writer::sensors::analog::AnalogSensor::new(adc, vbat_pin, &mut delay)
+        };
+        defmt::info!("\tAnalog sensor");
+
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
             &mut gpioc.otyper,
@@ -129,13 +153,13 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        //regular_test::spawn().expect("Failed to spawn regular test task");
+        regular_test::spawn().expect("Failed to spawn regular test task");
 
         defmt::info!("Tasks spawned");
 
         //---------------------------------------------------------------------
 
-        (Shared { rtc }, Local { led })
+        (Shared { rtc }, Local { led, analog_sens })
     }
 
     //-------------------------------------------------------------------------
@@ -143,6 +167,7 @@ mod app {
     #[task(binds = RTC_WKUP, shared = [rtc], priority = 1)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
+
         rtc.lock(|rtc| rtc.handle_alarm_interrupt());
 
         let now = rtc.lock(|rtc| rtc.current_time());
@@ -151,18 +176,16 @@ mod app {
 
     //-------------------------------------------------------------------------
 
-    #[task(shared = [rtc], priority = 1)]
+    #[task(local = [analog_sens], priority = 1)]
     async fn regular_test(ctx: regular_test::Context) {
-        use rtic_monotonics::fugit::ExtU64;
-
-        let mut rtc = ctx.shared.rtc;
+        let analog_sens = ctx.local.analog_sens;
 
         defmt::info!("Regular test task");
         loop {
-            let now = rtc.lock(|rtc| rtc.current_time());
+            let (vbat, tcpu) = analog_sens.read();
+            defmt::info!("VBAT: {} V, TCPU: {} °C", vbat, tcpu);
 
-            defmt::info!("Hello from regular test task on {}!", now);
-            Mono::delay(125u64.millis()).await;
+            Mono::delay(1000u64.millis()).await;
         }
     }
 }

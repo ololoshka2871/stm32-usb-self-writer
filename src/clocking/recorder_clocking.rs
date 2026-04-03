@@ -59,7 +59,9 @@ impl<
                 stm32l4xx_hal::rcc::CrystalBypass::Disable,
                 stm32l4xx_hal::rcc::ClockSecuritySystem::Enable,
             )
-            .sysclk(Hertz(CPU_FREQ))
+            // in L4xx only Abstraction to select INPUT
+            // Core clock is __hclk__
+            .sysclk(Hertz(XTAL_FREQ)) 
             .hclk(Self::core_frequency())
             .pclk1(Self::apb1_frequency())
             .pclk2(Self::apb2_frequency())

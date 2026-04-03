@@ -5,6 +5,7 @@ pub mod led;
 pub mod len_in_u64_aligned;
 pub mod usb_connection_checker;
 pub mod vusb_monitor;
+pub mod nop_delay;
 
 #[cfg(feature = "stm32l433")]
 mod interrupt_controller_l433;

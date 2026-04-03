@@ -6,6 +6,10 @@ mod support;
 
 pub mod config;
 pub mod clocking;
+pub mod sensors;
+
+pub use crate::support::nop_delay::NOPDelay;
+
 //
 //#[cfg(debug_assertions)]
 //mod master_value_stat;
