@@ -43,7 +43,22 @@ fn main() -> Result<(), String> {
 
     let start = Instant::now();
 
-    let total = run_benchmark(&samples, config.iterations)?;
+    let scaled_samples: Vec<u32> = samples
+        .iter()
+        .map(|&s| {
+            let scaled = (s * 1000.0).round();
+            if !(0.0..=(u32::MAX as f32)).contains(&scaled) {
+                Err(format!(
+                    "Значение вне диапазона u32 в '{}' на строке {}",
+                    config.csv_path.display(),
+                    samples.iter().position(|&x| x == s).unwrap_or(0) + 1
+                ))
+            } else {
+                Ok(scaled as u32)
+            }
+        })
+        .collect::<Result<_, _>>()?;
+    let total = run_benchmark(&scaled_samples, config.iterations)?;
 
     let elapsed = start.elapsed();
 
@@ -57,7 +72,7 @@ fn main() -> Result<(), String> {
         total.packed_bytes as f64 / total.input_bytes as f64
     };
 
-    println!("Host benchmark completed:");
+    println!("Benchmark pack u32:");
     println!("\tfile: {}", config.csv_path.display());
     println!("\tmin iterations: {}", config.iterations);
     println!("\tactual loops: {}", total.dataset_loops);
@@ -65,7 +80,46 @@ fn main() -> Result<(), String> {
     println!("\tpages(blocks): {}", total.block_count);
     println!("\tinput bytes: {}", total.input_bytes);
     println!("\tpacked bytes: {}", total.packed_bytes);
-    println!("\tcompression ratio (packed/input): {:.4}", compression_ratio);
+    println!(
+        "\tcompression ratio (packed/input): {:.4}",
+        compression_ratio
+    );
+    println!("\telapsed: {:.3} s", elapsed_sec);
+    println!("\tthroughput: {:.0} samples/s", samples_per_sec);
+    println!("\tinput throughput: {:.3} MiB/s", input_mib_per_sec);
+    println!("\tpacked throughput: {:.3} MiB/s", packed_mib_per_sec);
+
+    let pseudo_f32_samples = samples
+        .iter()
+        .map(|&s| unsafe { core::mem::transmute::<f32, u32>(s) })
+        .collect::<Vec<_>>();
+
+    let total = run_benchmark(&pseudo_f32_samples, config.iterations)?;
+
+    let elapsed = start.elapsed();
+
+    let elapsed_sec = elapsed.as_secs_f64();
+    let samples_per_sec = total.sample_count as f64 / elapsed_sec;
+    let input_mib_per_sec = total.input_bytes as f64 / (1024.0 * 1024.0) / elapsed_sec;
+    let packed_mib_per_sec = total.packed_bytes as f64 / (1024.0 * 1024.0) / elapsed_sec;
+    let compression_ratio = if total.input_bytes == 0 {
+        0.0
+    } else {
+        total.packed_bytes as f64 / total.input_bytes as f64
+    };
+
+    println!("Benchmark pack pseudo f32:");
+    println!("\tfile: {}", config.csv_path.display());
+    println!("\tmin iterations: {}", config.iterations);
+    println!("\tactual loops: {}", total.dataset_loops);
+    println!("\tsamples: {}", total.sample_count);
+    println!("\tpages(blocks): {}", total.block_count);
+    println!("\tinput bytes: {}", total.input_bytes);
+    println!("\tpacked bytes: {}", total.packed_bytes);
+    println!(
+        "\tcompression ratio (packed/input): {:.4}",
+        compression_ratio
+    );
     println!("\telapsed: {:.3} s", elapsed_sec);
     println!("\tthroughput: {:.0} samples/s", samples_per_sec);
     println!("\tinput throughput: {:.3} MiB/s", input_mib_per_sec);
@@ -137,8 +191,9 @@ fn finalize_block(packer: DataBlockPacker) -> Result<Vec<u8>, String> {
         .ok_or_else(|| "Failed to finalize packed block".to_string())
 }
 
-fn read_samples(path: &Path) -> Result<Vec<u32>, String> {
-    let file = File::open(path).map_err(|e| format!("Не удалось открыть '{}': {e}", path.display()))?;
+fn read_samples(path: &Path) -> Result<Vec<f32>, String> {
+    let file =
+        File::open(path).map_err(|e| format!("Не удалось открыть '{}': {e}", path.display()))?;
     let reader = BufReader::new(file);
 
     let mut samples = Vec::new();
@@ -166,16 +221,7 @@ fn read_samples(path: &Path) -> Result<Vec<u32>, String> {
             )
         })?;
 
-        let scaled = (value_hz * 1000.0).round();
-        if !(0.0..=(u32::MAX as f32)).contains(&scaled) {
-            return Err(format!(
-                "Значение вне диапазона u32 в '{}' на строке {}",
-                path.display(),
-                line_idx + 1
-            ));
-        }
-
-        samples.push(scaled as u32);
+        samples.push(value_hz);
     }
 
     Ok(samples)
@@ -190,12 +236,12 @@ fn parse_args() -> Result<Config, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-i" | "--iterations" => {
-                let value = args.next().ok_or_else(|| {
-                    "Ожидалось значение после --iterations/-i".to_string()
-                })?;
-                iterations = value.parse::<usize>().map_err(|e| {
-                    format!("Некорректное значение iterations '{}': {e}", value)
-                })?;
+                let value = args
+                    .next()
+                    .ok_or_else(|| "Ожидалось значение после --iterations/-i".to_string())?;
+                iterations = value
+                    .parse::<usize>()
+                    .map_err(|e| format!("Некорректное значение iterations '{}': {e}", value))?;
                 if iterations == 0 {
                     return Err("iterations должно быть > 0".to_string());
                 }
@@ -222,7 +268,9 @@ fn parse_args() -> Result<Config, String> {
 fn print_help() {
     println!("Host benchmark for STM32 self-writer packet pipeline");
     println!("\nUsage:");
-    println!("  cargo run --release --target x86_64-pc-windows-msvc -- [CSV_PATH] [--iterations N]");
+    println!(
+        "  cargo run --release --target x86_64-pc-windows-msvc -- [CSV_PATH] [--iterations N]"
+    );
     println!("\nDefaults:");
     println!("  CSV_PATH     {}", DEFAULT_CSV_PATH);
     println!("  iterations   {}", DEFAULT_ITERATIONS);
