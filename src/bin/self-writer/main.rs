@@ -44,6 +44,8 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
+    use stm32_usb_self_writer::sensors::freqmeter::MasterCounter;
+
     use super::*;
 
     #[shared]
@@ -143,6 +145,19 @@ mod app {
             stm32_usb_self_writer::sensors::analog::AnalogSensor::new(adc, vbat_pin, &mut delay)
         };
         defmt::info!("\tAnalog sensor");
+
+        let freqmeters = {
+            MasterCounter::init(
+                types::HighPerformanceClockProvider::master_counter_frequency(),
+                alloc::sync::Arc::new(stm32_usb_self_writer::InterruptController::new(
+                    ctx.core.NVIC,
+                )),
+            );
+            defmt::info!("\tMaster counter");
+
+            let mut master_timer = MasterCounter::acquire();
+            master_timer.want_start(); // drop master timer and stop it
+        };
 
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,

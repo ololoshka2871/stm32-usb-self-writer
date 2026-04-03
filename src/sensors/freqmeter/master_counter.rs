@@ -183,7 +183,7 @@ impl Drop for MasterTimerInfo {
 
 //-----------------------------------------------------------------------------
 
-pub(crate) unsafe fn master_ovf(id: u32) {
+pub unsafe fn master_ovf(id: u32) {
     if MATSTER_COUNTER.is_some() {
         MATSTER_COUNTER.as_mut().unwrap_unchecked().ovf_irq(id)
     }

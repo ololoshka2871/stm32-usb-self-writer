@@ -4,11 +4,14 @@ extern crate alloc;
 
 mod support;
 
-pub mod config;
 pub mod clocking;
+pub mod config;
 pub mod sensors;
 
-pub use crate::support::nop_delay::NOPDelay;
+pub use crate::support::{
+    interrupt_controller::IInterruptController,
+    InterruptController, nop_delay::NOPDelay,
+};
 
 //
 //#[cfg(debug_assertions)]
