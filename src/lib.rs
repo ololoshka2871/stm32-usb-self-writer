@@ -2,8 +2,7 @@
 
 extern crate alloc;
 
-mod support;
-
+pub mod support;
 pub mod clocking;
 pub mod config;
 pub mod sensors;

@@ -57,7 +57,7 @@ pub const FLASH_CLEANER_PRIO: u8 = IDLE_TASK_PRIO + 2;
 
 //-----------------------------------------------------------------------------
 
-pub const INITIAL_FREQMETER_TARGET: u32 = 1;
+pub const INITIAL_FREQMETER_TARGET: u16 = 1;
 
 //-----------------------------------------------------------------------------
 

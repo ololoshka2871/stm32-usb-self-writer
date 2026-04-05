@@ -41,6 +41,7 @@ defmt-rtt = "1"
 defmt-macros = "1"
 panic-abort = "0.3"
 
+stm32ral = { version = "0.8", default-features = false, features = ["rtic"] }
 stm32l4xx-hal = { git = "https://github.com/stm32-rs/stm32l4xx-hal.git", rev = "e4835469a38b844865a6d5eef91542bdc6822941", features = ["rt", "unproven", "stm32-usbd"] }
 
 self-recorder-packet = { git = "https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git", rev = "e25058f91e", default-features = false }
@@ -85,7 +86,8 @@ monitor-output = ["monitor"]
 stm32l433 = [
   "stm32l4xx-hal/stm32l433", 
   "qspi-stm32lx3/stm32l433", 
-  "rtic/thumbv7-backend"
+  "rtic/thumbv7-backend",
+  "stm32ral/armv7em", "stm32ral/stm32l4x3",
 ]
 monitor = []
 freqmeter-start-stop = []

@@ -1228,6 +1228,7 @@ dependencies = [
  "static_assertions",
  "stm32-usbd",
  "stm32l4xx-hal",
+ "stm32ral",
  "strum",
  "umm-malloc",
  "usb-device",
@@ -1276,6 +1277,15 @@ dependencies = [
  "stm32-usbd",
  "stm32l4",
  "void",
+]
+
+[[package]]
+name = "stm32ral"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48ae31099177ef1bbdeee6f1b9a38d869aa6c8c3232cf248c39642875d42c532"
+dependencies = [
+ "cortex-m",
 ]
 
 [[package]]

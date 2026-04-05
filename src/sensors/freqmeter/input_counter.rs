@@ -1,3 +1,8 @@
+use stm32l4xx_hal::{
+    gpio::{Alternate, PushPull, PA1, PA5, PA8, PA9},
+    pac::{RCC, TIM1, TIM2},
+};
+
 use super::tim_input_config_helper::{Edge, TimerControl, TimerInputConfig};
 
 #[allow(unused)]
@@ -28,15 +33,9 @@ pub struct InputCounter<TIM, const IN_TYPE: u8> {
     tim: TIM,
 }
 
-impl<TIM, const IN_TYPE: u8> InputCounter<TIM, IN_TYPE> {
-    pub fn from_timer(tim: TIM) -> Self {
-        Self { tim }
-    }
-}
-
 impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> InputCounter<TIM, IN_TYPE> {
     pub fn configure(&mut self) {
-         let ext_in_type = IN_TYPE.into();
+        let ext_in_type = IN_TYPE.into();
 
         self.tim.reset();
         self.tim.set_edge(ext_in_type, Edge::Rising);
@@ -68,47 +67,40 @@ impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> InputCounter<TIM, 
     }
 }
 
-//impl_input_counters!(
-//    TIM1: (PA8<Alternate<AF2>>, { ExtInputType::TI1FP1 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
-//    TIM1: (PA9<Alternate<AF2>>, { ExtInputType::TI2FP2 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
-//
-//    TIM3: (PA6<Alternate<AF1>>, { ExtInputType::TI1FP1 as u8 }, tim3en, tim3rst, apb1enr, apb1rstr),
-//    TIM3: (PA7<Alternate<AF1>>, { ExtInputType::TI2FP2 as u8 }, tim3en, tim3rst, apb1enr, apb1rstr),
-//);
-//
-//impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> InputCounter<TIM, IN_TYPE> {
-//    #[allow(dead_code)]
-//    pub fn load_counter(&mut self, value: u16) {
-//        self.tim.write_count(value.into());
-//    }
-//
-//    pub fn load_max(&mut self) {
-//        self.tim.write_count(u16::MAX.into());
-//    }
-//
-//    pub fn load_target(&mut self, value: u16) {
-//        self.tim.set_auto_reload(value);
-//    }
-//
-//    pub fn enable(&mut self) {
-//        self.tim.reset_counter();
-//        self.tim.enable_counter(true);
-//    }
-//
-//    pub fn disable(&mut self) {
-//        self.tim.enable_counter(false);
-//    }
-//
-//    fn configure(&mut self) {
-//        let ext_in_type = IN_TYPE.into();
-//
-//        self.tim.reset();
-//
-//        self.tim.set_edge(ext_in_type, Edge::Rising);
-//        self.tim.enable_filter(ext_in_type);
-//        self.tim.set_ext_input(ext_in_type);
-//        self.tim.dma_request_ovf();
-//
-//        self.tim.set_auto_reload(5);
-//    }
-//}
+macro_rules! impl_input_counters {
+    ($($TIM:ident: ($PIN:ty, $EXT_IN_TYPE:expr, $timXen:ident, $timXrst:ident, $apbenr:ident, $apbrstr:ident),)+) => {
+        $(
+            impl TimerInpitCounterExt<$PIN, $EXT_IN_TYPE> for $TIM {
+                fn into_input_counter(
+                    self,
+                    _pin: $PIN,
+                ) -> InputCounter<Self, $EXT_IN_TYPE> {
+                    InputCounter::<Self, $EXT_IN_TYPE>::new(self)
+                }
+            }
+
+            impl InputCounter<$TIM, $EXT_IN_TYPE> {
+                pub fn new(tim: $TIM) -> Self {
+                    let rcc = unsafe { &*RCC::ptr() };
+
+                    rcc.$apbenr.modify(|_, w| w.$timXen().set_bit());
+                    rcc.$apbrstr.modify(|_, w| w.$timXrst().set_bit());
+                    rcc.$apbrstr.modify(|_, w| w.$timXrst().clear_bit());
+
+                    let mut t = Self { tim };
+                    t.configure();
+                    t
+                }
+            }
+        )+
+    };
+}
+
+impl_input_counters!(
+    TIM1: (PA8<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
+    TIM1: (PA9<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
+
+    // FIXME
+    TIM2: (PA5<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
+    TIM2: (PA1<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
+);

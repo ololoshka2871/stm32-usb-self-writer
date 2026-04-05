@@ -8,18 +8,15 @@ extern crate alloc;
 use defmt_rtt as _; // global logger
 use panic_abort as _;
 
-use stm32l4xx_hal::stm32;
-
-use rtic_monotonics::fugit::RateExtU32;
-use stm32l4xx_hal::flash::FlashExt;
 use stm32l4xx_hal::prelude::*;
 
 use rtic::app;
 use rtic_monotonics::{fugit::ExtU64, systick_monotonic, Monotonic};
 
 use stm32_usb_self_writer::{
-    clocking::{rtc::RtcService, ClockConfigProvider, PllConfigProvider},
+    clocking::{rtc::RtcService, ClockConfigProvider},
     config, is_usb_connected,
+    sensors::freqmeter::TimerInpitCounterExt,
 };
 
 //-----------------------------------------------------------------------------
@@ -41,8 +38,6 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
-    use stm32_usb_self_writer::sensors::freqmeter::{self, FreqmetersScaffold};
-
     use super::*;
 
     #[shared]
@@ -55,14 +50,17 @@ mod app {
         led: types::Led,
 
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
-        _freqmeters: FreqmetersScaffold,
+
+        master_timer: types::MasterCounter,
     }
 
     #[init]
     fn init(mut ctx: init::Context) -> (Shared, Local) {
+        let mut dp = ctx.device;
+
         #[cfg(feature = "force-defmt-logs")]
         // need for defmt logging works https://github.com/knurling-rs/probe-run/pull/183/files
-        ctx.device.RCC.ahb1enr.modify(|_, w| w.dma1en().set_bit());
+        dp.RCC.ahb1enr.modify(|_, w| w.dma1en().set_bit());
 
         defmt::info!("+ Init +");
 
@@ -72,9 +70,9 @@ mod app {
 
         let fast_mode = is_usb_connected();
 
-        let mut flash = ctx.device.FLASH.constrain();
-        let mut rcc = ctx.device.RCC.constrain();
-        let mut pwr = ctx.device.PWR.constrain(&mut rcc.apb1r1);
+        let mut flash = dp.FLASH.constrain();
+        let mut rcc = dp.RCC.constrain();
+        let mut pwr = dp.PWR.constrain(&mut rcc.apb1r1);
 
         let xtal_clocks = config::XTAL_FREQ;
 
@@ -109,8 +107,8 @@ mod app {
         defmt::info!("\tSysTick");
 
         let (mut rtc, rtc_clock_source) = RtcService::init(
-            ctx.device.RTC,
-            &mut ctx.device.EXTI,
+            dp.RTC,
+            &mut dp.EXTI,
             &mut rcc.apb1r1,
             &mut rcc.bdcr,
             &mut pwr.cr1,
@@ -121,20 +119,25 @@ mod app {
             defmt::Debug2Format(&rtc_clock_source)
         );
 
-        let mut gpioa = ctx.device.GPIOA.split(&mut rcc.ahb2);
-        let mut gpiob = ctx.device.GPIOB.split(&mut rcc.ahb2);
-        let mut gpioc = ctx.device.GPIOC.split(&mut rcc.ahb2);
-        let mut gpiod = ctx.device.GPIOD.split(&mut rcc.ahb2);
-        let mut gpioe = ctx.device.GPIOE.split(&mut rcc.ahb2);
+        #[allow(dead_code, unused_mut)]
+        let mut gpioa = dp.GPIOA.split(&mut rcc.ahb2);
+        #[allow(dead_code, unused_mut)]
+        let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
+        #[allow(dead_code, unused_mut)]
+        let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
+        #[allow(dead_code, unused_mut)]
+        let mut gpiod = dp.GPIOD.split(&mut rcc.ahb2);
+        #[allow(dead_code, unused_mut)]
+        let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
 
         let analog_sens = {
             let mut delay = stm32_usb_self_writer::NOPDelay {
                 sys_clk: clocks.sysclk(),
             };
 
-            let mut adc = stm32l4xx_hal::adc::ADC::new(
-                ctx.device.ADC1,
-                ctx.device.ADC_COMMON,
+            let adc = stm32l4xx_hal::adc::ADC::new(
+                dp.ADC1,
+                dp.ADC_COMMON,
                 &mut rcc.ahb2,
                 &mut rcc.ccipr,
                 &mut delay,
@@ -146,9 +149,61 @@ mod app {
         };
         defmt::info!("\tAnalog sensor");
 
-        let freqmeters = {
-            // TODO: build_freqmeter!
-        };
+        // Master timer
+        let master_timer = types::MasterCounter::new(stm32l4xx_hal::timer::Timer::tim6(
+            dp.TIM6,
+            1.hz(),
+            clocks,
+            &mut rcc.apb1r1,
+        ));
+
+        let dma1 = dp.DMA1.split(&mut rcc.ahb1);
+
+        let (
+            freqmeter1,
+            //transfer_fin1,
+            f1_capturer,
+            f1_capture_buffer,
+            (f1_capture_tx, f1_capture_rx),
+            (f1_target_tx, f1_target_rx),
+        ) = stm32_usb_self_writer::build_freqmeter!(
+            input_timer = dp
+                .TIM1
+                .into_input_counter(gpioa.pa8.into_alternate_push_pull(
+                    &mut gpioa.moder,
+                    &mut gpioa.otyper,
+                    &mut gpioa.afrh
+                )),
+            dma_channel = dma1.6, // DMA1 Channel 6[CxS=7] is connected to TIM1_UP
+            master_timer = master_timer,
+            master_type = types::MasterCounterType,
+            dp = dp,
+            stop_reg = apb2_fz,
+            stop_bit = dbg_tim1_stop
+        );
+
+        let (
+            freqmeter2,
+            //transfer_fin2,
+            f2_capturer,
+            f2_capture_buffer,
+            (f2_capture_tx, f2_capture_rx),
+            (f2_target_tx, f2_target_rx),
+        ) = stm32_usb_self_writer::build_freqmeter!(
+            input_timer = dp
+                .TIM2
+                .into_input_counter(gpioa.pa5.into_alternate_push_pull(
+                    &mut gpioa.moder,
+                    &mut gpioa.otyper,
+                    &mut gpioa.afrl
+                )),
+            dma_channel = dma.2, // DMA1 Channel 2[CxS=4] is connected to TIM2_UP
+            master_timer = master_timer,
+            master_type = types::MasterCounterType,
+            dp = dp,
+            stop_reg = apb1_fz,
+            stop_bit = dbg_tim2_stop
+        );
 
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
@@ -170,12 +225,17 @@ mod app {
             Local {
                 led,
                 analog_sens,
-                _freqmeters: freqmeters,
+                master_timer,
             },
         )
     }
 
     //-------------------------------------------------------------------------
+
+    #[task(binds = TIM6_DAC, local = [master_timer], priority = 6)]
+    fn master_timer_ovf(ctx: master_timer_ovf::Context) {
+        unsafe { ctx.local.master_timer.overflow() };
+    }
 
     //#[task(binds=DMA1_CH4_5_6_7, shared = [transfer_fin1, f1_capturer], local = [f1_capture_buffer, f1_capture_tx, f1_target_rx], priority = 3)]
     //fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {

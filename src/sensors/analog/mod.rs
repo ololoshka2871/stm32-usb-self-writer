@@ -1,12 +1,12 @@
-use cortex_m::{delay, prelude::*};
+use cortex_m::prelude::*;
 use embedded_hal::blocking::delay::DelayUs;
 use stm32l4xx_hal::adc::{Channel, Resolution, SampleTime, Temperature, Vref, ADC};
 
-pub struct AnalogSensor<BATTERY_PIN> {
+pub struct AnalogSensor<BP> {
     adc: ADC,
     tcpu_ch: Temperature,
     v_ref: Vref,
-    vbat_pin: BATTERY_PIN,
+    vbat_pin: BP,
 }
 
 impl<BATTERY_PIN: Send + Channel> AnalogSensor<BATTERY_PIN> {

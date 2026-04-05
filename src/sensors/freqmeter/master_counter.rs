@@ -7,9 +7,9 @@ macro_rules! master_timer {
         pub mod $name {
             use stm32ral::*;
             use stm32l4xx_hal::timer::Timer;
-            use crate::drivers::{
+            use crate::sensors::freqmeter::{
                 InputCounter,
-                Capturer16,
+                Capturer,
                 tim_input_config_helper::{TimerInputConfig, TimerControl},
             };
 
@@ -34,9 +34,11 @@ macro_rules! master_timer {
                     Self(extender as *mut _)
                 }
 
-                pub fn make_capturer<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8>(&self, input_counter: InputCounter<TIM, IN_TYPE>) -> Capturer16<TIM, IN_TYPE> {
+                pub fn make_capturer<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8>(
+                    &self, input_counter: InputCounter<TIM, IN_TYPE>
+                ) -> Capturer<TIM, IN_TYPE> {
                     let tgt = unsafe { $ral_steal_tgt };
-                    Capturer16::new(input_counter, &tgt.CNT as *const _ as u32, self.0 as *const _)
+                    Capturer::new(input_counter, &tgt.CNT as *const _ as u32, self.0 as *const _)
                 }
 
                 pub fn listen(&mut self) {
@@ -58,7 +60,5 @@ macro_rules! master_timer {
     };
 }
 
-//master_timer!(m_tim1, tim1, tim1::TIM1::steal(), stm32f1xx_hal::pac::TIM1);
-//master_timer!(m_tim2, tim2, tim2::TIM2::steal(), stm32f1xx_hal::pac::TIM2);
-//master_timer!(m_tim3, tim3, tim3::TIM3::steal(), stm32f1xx_hal::pac::TIM3);
-//master_timer!(m_tim4, tim4, tim4::TIM4::steal(), stm32f1xx_hal::pac::TIM4);
+master_timer!(m_tim6, tim6, tim6::TIM6::steal(), stm32l4xx_hal::pac::TIM6);
+master_timer!(m_tim7, tim7, tim7::TIM7::steal(), stm32l4xx_hal::pac::TIM7);

@@ -33,6 +33,7 @@ where
 /// unsafe { led_set(0); }
 #[no_mangle]
 pub extern "C" fn led_set(state: u8) {
+    #[allow(static_mut_refs)]
     if let Some(l) = unsafe { LED.as_mut() } {
         let _ = if state == 0 {
             l.0.set_high() // led OFF

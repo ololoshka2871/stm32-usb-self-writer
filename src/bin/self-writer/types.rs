@@ -1,13 +1,12 @@
+#![allow(dead_code)]
+
 #[allow(unused_imports)]
 use stm32l4xx_hal::gpio::{
-    Alternate, Output, PushPull, PA2, PA3, PA6, PA7, PB0, PB1, PC10, PD11, PE12,
+    Alternate, Analog, Output, PushPull, PA0, PA1, PA2, PA3, PA6, PA7, PA8, PB0, PB1, PC10, PD10,
+    PD11, PD13, PE12,
 };
-use stm32l4xx_hal::gpio::{Analog, PA0, PA1, PA8, PD10, PD13};
 
-use stm32_usb_self_writer::{
-    config,
-    clocking::*,
-};
+use stm32_usb_self_writer::{clocking::*, config};
 
 //-----------------------------------------------------------------------------
 
@@ -33,11 +32,8 @@ impl PllConfigProvider for Pll {
     const SAI_DIV_CODE: u32 = 2;
 }
 
-pub type HighPerformanceClockProvider = HighPerformanceClockConfigProvider<
-    Pll,
-    { config::XTAL_FREQ },
-    { config::HIGH_PERF_CPU_FREQ },
->;
+pub type HighPerformanceClockProvider =
+    HighPerformanceClockConfigProvider<Pll, { config::XTAL_FREQ }, { config::HIGH_PERF_CPU_FREQ }>;
 pub type RecorderClockProvider =
     RecorderClockConfigProvider<{ config::XTAL_FREQ }, { config::SELF_WRITER_CPU_FREQ }>;
 
@@ -84,3 +80,8 @@ pub type InPPin = PA8<Alternate<PushPull, 1>>;
 pub type InTPin = PA0<Alternate<PushPull, 1>>;
 pub type EnPPin = PD13<Output<PushPull>>;
 pub type EnTPin = PD10<Output<PushPull>>;
+
+//-----------------------------------------------------------------------------
+
+pub type MasterCounter = stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::MasterCounter16;
+pub type MasterCounterType = stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::Type;
