@@ -8,15 +8,20 @@ extern crate alloc;
 use defmt_rtt as _; // global logger
 use panic_abort as _;
 
-use stm32l4xx_hal::prelude::*;
+use stm32l4xx_hal::{
+    dma::dma1,
+    pac::{TIM1, TIM2},
+    prelude::*,
+};
 
 use rtic::app;
 use rtic_monotonics::{fugit::ExtU64, systick_monotonic, Monotonic};
+use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
     clocking::{rtc::RtcService, ClockConfigProvider},
     config, is_usb_connected,
-    sensors::freqmeter::TimerInpitCounterExt,
+    sensors::freqmeter::{Capture, Capturer, ExtInputType, Freqmeter, TimerInpitCounterExt},
 };
 
 //-----------------------------------------------------------------------------
@@ -43,6 +48,12 @@ mod app {
     #[shared]
     struct Shared {
         rtc: RtcService,
+
+        transfer_fin1: dma1::C6,
+        f1_capturer: Capturer<TIM1, { ExtInputType::TI1FP1 as u8 }>,
+
+        transfer_fin2: dma1::C2,
+        f2_capturer: Capturer<TIM2, { ExtInputType::TI1FP1 as u8 }>,
     }
 
     #[local]
@@ -52,6 +63,20 @@ mod app {
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
 
         master_timer: types::MasterCounter,
+        freqmeter1: Freqmeter,
+        freqmeter2: Freqmeter,
+
+        f1_capture_buffer: &'static mut types::MasterCounterType,
+        f1_capture_tx: Sender<'static, Capture, 1>,
+        f1_capture_rx: Receiver<'static, Capture, 1>,
+        f1_target_rx: Receiver<'static, u16, 1>,
+        f1_target_tx: Sender<'static, u16, 1>,
+
+        f2_capture_buffer: &'static mut types::MasterCounterType,
+        f2_capture_tx: Sender<'static, Capture, 1>,
+        f2_capture_rx: Receiver<'static, Capture, 1>,
+        f2_target_rx: Receiver<'static, u16, 1>,
+        f2_target_tx: Sender<'static, u16, 1>,
     }
 
     #[init]
@@ -74,9 +99,7 @@ mod app {
         let mut rcc = dp.RCC.constrain();
         let mut pwr = dp.PWR.constrain(&mut rcc.apb1r1);
 
-        let xtal_clocks = config::XTAL_FREQ;
-
-        let (clocks, master_counter_freq, high_perf_mode) = if fast_mode {
+        let (clocks, _master_counter_freq, _high_perf_mode) = if fast_mode {
             defmt::info!("\tUSB connected, starting in high performance mode");
             (
                 types::HighPerformanceClockProvider::configure_clocks(
@@ -161,7 +184,7 @@ mod app {
 
         let (
             freqmeter1,
-            //transfer_fin1,
+            transfer_fin1,
             f1_capturer,
             f1_capture_buffer,
             (f1_capture_tx, f1_capture_rx),
@@ -184,7 +207,7 @@ mod app {
 
         let (
             freqmeter2,
-            //transfer_fin2,
+            transfer_fin2,
             f2_capturer,
             f2_capture_buffer,
             (f2_capture_tx, f2_capture_rx),
@@ -197,7 +220,7 @@ mod app {
                     &mut gpioa.otyper,
                     &mut gpioa.afrl
                 )),
-            dma_channel = dma.2, // DMA1 Channel 2[CxS=4] is connected to TIM2_UP
+            dma_channel = dma1.2, // DMA1 Channel 2[CxS=4] is connected to TIM2_UP
             master_timer = master_timer,
             master_type = types::MasterCounterType,
             dp = dp,
@@ -221,11 +244,33 @@ mod app {
         //---------------------------------------------------------------------
 
         (
-            Shared { rtc },
+            Shared {
+                rtc,
+
+                transfer_fin1,
+                f1_capturer,
+
+                transfer_fin2,
+                f2_capturer,
+            },
             Local {
                 led,
                 analog_sens,
                 master_timer,
+
+                freqmeter1,
+                freqmeter2,
+
+                f1_capture_buffer,
+                f1_capture_tx,
+                f1_capture_rx,
+                f1_target_rx,
+                f1_target_tx,
+                f2_capture_buffer,
+                f2_capture_tx,
+                f2_capture_rx,
+                f2_target_rx,
+                f2_target_tx,
             },
         )
     }
@@ -237,29 +282,39 @@ mod app {
         unsafe { ctx.local.master_timer.overflow() };
     }
 
-    //#[task(binds=DMA1_CH4_5_6_7, shared = [transfer_fin1, f1_capturer], local = [f1_capture_buffer, f1_capture_tx, f1_target_rx], priority = 3)]
-    //fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
-    //    dma_interrupt!(
-    //        buffer: **ctx.local.f1_capture_buffer,
-    //        cature_tx: ctx.local.f1_capture_tx,
-    //        target_rx: ctx.local.f1_target_rx,
-    //        capturerer: ctx.shared.f1_capturer,
-    //        transfer: ctx.shared.transfer_fin1,
-    //        cgifX: cgif5
-    //    );
-    //}
-    //
-    //#[task(binds=DMA1_CH2_3, shared = [transfer_fin2, f2_capturer], local = [f2_capture_buffer, f2_capture_tx, f2_target_rx], priority = 3)]
-    //fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
-    //    dma_interrupt!(
-    //        buffer: **ctx.local.f2_capture_buffer,
-    //        cature_tx: ctx.local.f2_capture_tx,
-    //        target_rx: ctx.local.f2_target_rx,
-    //        capturerer: ctx.shared.f2_capturer,
-    //        transfer: ctx.shared.transfer_fin2,
-    //        cgifX: cgif3
-    //    );
-    //}
+    #[task(
+        binds=DMA1_CH6, 
+        shared = [transfer_fin1, f1_capturer], 
+        local = [f1_capture_buffer, f1_capture_tx, f1_target_rx], 
+        priority = 3)
+    ]
+    fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
+        stm32_usb_self_writer::freqmeter_dma_interrupt!(
+            buffer: **ctx.local.f1_capture_buffer,
+            capture_tx: ctx.local.f1_capture_tx,
+            target_rx: ctx.local.f1_target_rx,
+            capturer: ctx.shared.f1_capturer,
+            transfer: ctx.shared.transfer_fin1,
+            cgifX: cgif6
+        );
+    }
+
+    #[task(
+        binds=DMA1_CH2, 
+        shared = [transfer_fin2, f2_capturer], 
+        local = [f2_capture_buffer, f2_capture_tx, f2_target_rx],
+        priority = 3)
+    ]
+    fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
+        stm32_usb_self_writer::freqmeter_dma_interrupt!(
+            buffer: **ctx.local.f2_capture_buffer,
+            capture_tx: ctx.local.f2_capture_tx,
+            target_rx: ctx.local.f2_target_rx,
+            capturer: ctx.shared.f2_capturer,
+            transfer: ctx.shared.transfer_fin2,
+            cgifX: cgif2
+        );
+    }
 
     #[task(binds = RTC_WKUP, shared = [rtc], priority = 1)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {

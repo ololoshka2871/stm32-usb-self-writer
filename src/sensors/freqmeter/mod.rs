@@ -4,41 +4,42 @@ mod input_counter;
 
 pub mod dma_traits;
 pub mod freqmeter;
+pub mod freqmeter_dma_l4;
 pub mod master_counter;
 pub mod tim_input_config_helper;
 
 pub use capture::Capture;
 pub use capturer::Capturer;
 pub use freqmeter::Freqmeter;
-pub use input_counter::{InputCounter, TimerInpitCounterExt};
+pub use freqmeter_dma_l4::FreqmeterDmaChannelExt;
+pub use input_counter::{ExtInputType, InputCounter, TimerInpitCounterExt};
 pub use master_counter::*;
 
 #[macro_export]
 macro_rules! freqmeter_dma_interrupt {
     (
         buffer: $buffer:expr,
-        cature_tx: $cature_tx:expr,
+        capture_tx: $capture_tx:expr,
         target_rx: $target_rx:expr,
-        capturerer: $capturerer:expr,
+        capturer: $capturer:expr,
         transfer: $transfer:expr,
         cgifX: $cgifX:ident
     ) => {{
-        let capture = $capturerer.lock(|capturerer| capturerer.capture($buffer));
+        use stm32_usb_self_writer::sensors::freqmeter::FreqmeterDmaChannelExt;
 
-        $cature_tx.try_send(capture).ok();
+        let buffer = $buffer;
+        let capture = $capturer.lock(move |capturer| capturer.capture(buffer));
+
+        $capture_tx.try_send(capture).ok();
 
         if let Ok(new_tgt) = $target_rx.try_recv() {
-            $capturerer.lock(|capturerer| {
-                capturerer.stop();
-                capturerer.start(new_tgt);
+            $capturer.lock(|capturer| {
+                capturer.stop();
+                capturer.start(new_tgt);
             });
         }
 
-        $transfer.lock(|transfer| {
-            transfer.stop();
-            transfer.ifcr().write(|w| w.$cgifX().set_bit()); // Clear DMA interrupt flag
-            transfer.start();
-        });
+        $transfer.lock(|transfer| transfer.accept_isr());
     }};
 }
 
@@ -54,9 +55,9 @@ macro_rules! build_freqmeter {
         stop_bit=$stop_bit:ident
     ) => {{
         use stm32_usb_self_writer::sensors::freqmeter::{
+            freqmeter_dma_l4::FreqmeterDmaChannelExt,
             dma_traits::PeriAddress, Capture, Freqmeter,
         };
-        use stm32l4xx_hal::dma::Event;
 
         let mut capturer = $master_timer.make_capturer($input_timer);
 
@@ -65,23 +66,8 @@ macro_rules! build_freqmeter {
 
         let buffer = unsafe { cortex_m::singleton!(: $master_type = 0).unwrap_unchecked() };
 
-        // FIXME: STM32L4 use Advanced DMA, like F4
-        //let mut dma_transfer = $dma_channel;
-        //dma_transfer.set_memory_address(buffer as *const _ as u32, false);
-        //dma_transfer.set_peripheral_address(capturer.address(), false);
-        //dma_transfer.set_transfer_length(1);
-        //dma_transfer.ch().cr.modify(|_, w|
-        //    // по неустановленой причине, хотя счетчик нормально считает все 32 бита,
-        //    // но DMA не хочет копировать все 32 бита, только младшие 16
-        //    w
-        //        .pl().high()
-        //        .msize().bits32()
-        //        .psize().bits16()
-        //        .dir().from_peripheral()
-        //        .circ().set_bit()
-        //);
-        //dma_transfer.listen(Event::TransferComplete);
-        //dma_transfer.start();
+        let mut dma_transfer = $dma_channel;
+        dma_transfer.freqmeter_configure(buffer as *const _ as u32, capturer.address());
 
         capturer.start(config::INITIAL_FREQMETER_TARGET);
 
@@ -89,7 +75,7 @@ macro_rules! build_freqmeter {
 
         (
             freqmeter,
-            /*dma_transfer,*/
+            dma_transfer,
             capturer,
             buffer,
             rtic_sync::make_channel!(Capture, 1),

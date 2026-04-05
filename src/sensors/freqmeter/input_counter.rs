@@ -100,7 +100,6 @@ impl_input_counters!(
     TIM1: (PA8<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
     TIM1: (PA9<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
 
-    // FIXME
     TIM2: (PA5<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
     TIM2: (PA1<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
 );

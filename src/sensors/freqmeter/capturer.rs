@@ -43,11 +43,11 @@ impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> Capturer<TIM, IN_T
         self.input.disable();
     }
 
-    pub fn capture(&self, dma_value: u32) -> Capture {
+    pub fn capture(&self, dma_value: u16) -> Capture {
         let (extender_value, counter_value) = cortex_m::interrupt::free(|_| unsafe {
             (
                 self.master_extender.read_volatile() as u32,
-                (self.master_cnt_reg_addr as *const u32).read_volatile(),
+                (self.master_cnt_reg_addr as *const u16).read_volatile(),
             )
         });
 
@@ -61,7 +61,7 @@ impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> Capturer<TIM, IN_T
 
         Capture {
             target: self.current_target,
-            dma_value: (extender_value << 16) | dma_value,
+            dma_value: (extender_value << 16) | dma_value as u32,
         }
     }
 }
