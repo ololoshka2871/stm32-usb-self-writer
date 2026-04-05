@@ -1,8 +1,5 @@
 #![no_std]
 #![no_main]
-// For allocator
-#![feature(alloc_error_handler)]
-#![feature(adt_const_params)]
 
 mod types;
 
@@ -44,7 +41,7 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
-    use stm32_usb_self_writer::sensors::freqmeter::MasterCounter;
+    use stm32_usb_self_writer::sensors::freqmeter::{self, FreqmetersScaffold};
 
     use super::*;
 
@@ -58,6 +55,7 @@ mod app {
         led: types::Led,
 
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
+        _freqmeters: FreqmetersScaffold,
     }
 
     #[init]
@@ -80,18 +78,20 @@ mod app {
 
         let xtal_clocks = config::XTAL_FREQ;
 
-        let (clocks, high_perf_mode) = if fast_mode {
+        let (clocks, master_counter_freq, high_perf_mode) = if fast_mode {
             defmt::info!("\tUSB connected, starting in high performance mode");
             (
                 types::HighPerformanceClockProvider::configure_clocks(
                     &mut flash, &mut rcc, &mut pwr,
                 ),
+                types::HighPerformanceClockProvider::master_counter_frequency(),
                 true,
             )
         } else {
             defmt::info!("\tUSB not connected, starting in recorder mode");
             (
                 types::RecorderClockProvider::configure_clocks(&mut flash, &mut rcc, &mut pwr),
+                types::RecorderClockProvider::master_counter_frequency(),
                 false,
             )
         };
@@ -147,16 +147,7 @@ mod app {
         defmt::info!("\tAnalog sensor");
 
         let freqmeters = {
-            MasterCounter::init(
-                types::HighPerformanceClockProvider::master_counter_frequency(),
-                alloc::sync::Arc::new(stm32_usb_self_writer::InterruptController::new(
-                    ctx.core.NVIC,
-                )),
-            );
-            defmt::info!("\tMaster counter");
-
-            let mut master_timer = MasterCounter::acquire();
-            master_timer.want_start(); // drop master timer and stop it
+            // TODO: build_freqmeter!
         };
 
         let led = gpioc.pc10.into_push_pull_output_in_state(
@@ -174,10 +165,41 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        (Shared { rtc }, Local { led, analog_sens })
+        (
+            Shared { rtc },
+            Local {
+                led,
+                analog_sens,
+                _freqmeters: freqmeters,
+            },
+        )
     }
 
     //-------------------------------------------------------------------------
+
+    //#[task(binds=DMA1_CH4_5_6_7, shared = [transfer_fin1, f1_capturer], local = [f1_capture_buffer, f1_capture_tx, f1_target_rx], priority = 3)]
+    //fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
+    //    dma_interrupt!(
+    //        buffer: **ctx.local.f1_capture_buffer,
+    //        cature_tx: ctx.local.f1_capture_tx,
+    //        target_rx: ctx.local.f1_target_rx,
+    //        capturerer: ctx.shared.f1_capturer,
+    //        transfer: ctx.shared.transfer_fin1,
+    //        cgifX: cgif5
+    //    );
+    //}
+    //
+    //#[task(binds=DMA1_CH2_3, shared = [transfer_fin2, f2_capturer], local = [f2_capture_buffer, f2_capture_tx, f2_target_rx], priority = 3)]
+    //fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
+    //    dma_interrupt!(
+    //        buffer: **ctx.local.f2_capture_buffer,
+    //        cature_tx: ctx.local.f2_capture_tx,
+    //        target_rx: ctx.local.f2_target_rx,
+    //        capturerer: ctx.shared.f2_capturer,
+    //        transfer: ctx.shared.transfer_fin2,
+    //        cgifX: cgif3
+    //    );
+    //}
 
     #[task(binds = RTC_WKUP, shared = [rtc], priority = 1)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
