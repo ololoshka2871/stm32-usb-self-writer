@@ -18,11 +18,11 @@ pub use master_counter::*;
 #[macro_export]
 macro_rules! freqmeter_dma_interrupt {
     (
-        buffer: $buffer:expr,
-        capture_tx: $capture_tx:expr,
-        capturer: $capturer:expr,
-        transfer: $transfer:expr,
-        target_rx: $target_rx:expr,
+        buffer=$buffer:expr,
+        capture_tx=$capture_tx:expr,
+        capturer=$capturer:expr,
+        transfer=$transfer:expr,
+        target_rx=$target_rx:expr,
     ) => {{
         use stm32_usb_self_writer::sensors::freqmeter::FreqmeterDmaChannelExt;
 
@@ -135,7 +135,7 @@ macro_rules! freqmeter {
                     }
                 }
                 Ok(Err(_)) => {
-                    panic!("Capture channel closed");
+                    defmt::panic!("{}: Capture channel closed", $channel);
                 }
                 Err(_e) => {
                     defmt::warn!("{}: Capture timeout, restarting...", $channel);

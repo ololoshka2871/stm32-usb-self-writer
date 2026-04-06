@@ -23,6 +23,7 @@ use stm32_usb_self_writer::{
     clocking::{rtc::RtcService, ClockConfigProvider},
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, Freqmeter, TimerInpitCounterExt},
+    InputChannel,
 };
 
 //-----------------------------------------------------------------------------
@@ -316,11 +317,11 @@ mod app {
     ]
     fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
-            buffer: **ctx.local.f1_capture_buffer,
-            capture_tx: ctx.local.f1_capture_tx,
-            capturer: ctx.shared.f1_capturer,
-            transfer: ctx.shared.transfer_fin1,
-            target_rx: ctx.local.f1_target_rx,
+            buffer=**ctx.local.f1_capture_buffer,
+            capture_tx=ctx.local.f1_capture_tx,
+            capturer=ctx.shared.f1_capturer,
+            transfer=ctx.shared.transfer_fin1,
+            target_rx=ctx.local.f1_target_rx,
         );
     }
 
@@ -332,11 +333,11 @@ mod app {
     ]
     fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
-            buffer: **ctx.local.f2_capture_buffer,
-            capture_tx: ctx.local.f2_capture_tx,
-            capturer: ctx.shared.f2_capturer,
-            transfer: ctx.shared.transfer_fin2,
-            target_rx: ctx.local.f2_target_rx,
+            buffer=**ctx.local.f2_capture_buffer,
+            capture_tx=ctx.local.f2_capture_tx,
+            capturer=ctx.shared.f2_capturer,
+            transfer=ctx.shared.transfer_fin2,
+            target_rx=ctx.local.f2_target_rx,
         );
     }
 
@@ -359,7 +360,7 @@ mod app {
     )]
     async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
-            channel=stm32_usb_self_writer::support::InputChannel::Ch1,
+            channel=InputChannel::Ch1,
             capture_rx=ctx.local.f1_capture_rx,
             freqmeter=ctx.local.freqmeter1,
             //data_storage=(), 
@@ -377,7 +378,7 @@ mod app {
     )]
     async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
-            channel=stm32_usb_self_writer::support::InputChannel::Ch2,
+            channel=InputChannel::Ch2,
             capture_rx=ctx.local.f2_capture_rx,
             freqmeter=ctx.local.freqmeter2,
             //data_storage=(), 

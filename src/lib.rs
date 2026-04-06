@@ -2,14 +2,14 @@
 
 extern crate alloc;
 
-pub mod support;
 pub mod clocking;
 pub mod config;
 pub mod sensors;
+pub mod support;
 
 pub use crate::support::{
-    interrupt_controller::IInterruptController,
-    InterruptController, nop_delay::NOPDelay,
+    interrupt_controller::IInterruptController, nop_delay::NOPDelay, InputChannel,
+    InterruptController,
 };
 
 //
