@@ -4,14 +4,14 @@ use stm32l4xx_hal::{
 };
 
 pub trait FreqmeterDmaChannelExt {
-    fn freqmeter_configure(&mut self, memory_addr: u32, peripheral_addr: u32);
+    fn configure_tim_up(&mut self, memory_addr: u32, peripheral_addr: u32);
     fn accept_isr(&mut self);
 }
 
 macro_rules! impl_freqmeter_dma_channel {
     ($channel:ty, $cselr_fn:ident, $map:ident, $ccr:ident, $cgif_fn:ident) => {
         impl FreqmeterDmaChannelExt for $channel {
-            fn freqmeter_configure(&mut self, memory_addr: u32, peripheral_addr: u32) {
+            fn configure_tim_up(&mut self, memory_addr: u32, peripheral_addr: u32) {
                 self.stop();
                 self.set_memory_address(memory_addr, false);
                 self.set_peripheral_address(peripheral_addr, false);

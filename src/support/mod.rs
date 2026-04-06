@@ -16,3 +16,11 @@ pub use interrupt_controller_l433::InterruptController;
 #[cfg(debug_assertions)]
 pub mod debug_mcu;
 
+#[derive(Clone, Copy, PartialEq, defmt::Format)]
+#[allow(dead_code)]
+pub enum InputChannel {
+    Ch1 = 0,
+    Ch2 = 1,
+
+    COUNT = 2,
+}

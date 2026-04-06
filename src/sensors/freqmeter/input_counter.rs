@@ -1,5 +1,5 @@
 use stm32l4xx_hal::{
-    gpio::{Alternate, PushPull, PA1, PA5, PA8, PA9},
+    gpio::{Alternate, PushPull, PA0, PA1, PA8, PA9},
     pac::{RCC, TIM1, TIM2},
 };
 
@@ -100,6 +100,6 @@ impl_input_counters!(
     TIM1: (PA8<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
     TIM1: (PA9<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
 
-    TIM2: (PA5<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
+    TIM2: (PA0<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
     TIM2: (PA1<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
 );

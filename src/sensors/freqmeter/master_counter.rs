@@ -53,7 +53,6 @@ macro_rules! master_timer {
                     // clear update flag
                     let tgt = unsafe { $ral_steal_tgt };
                     stm32ral::modify_reg!($ral_path, tgt, SR, UIF: Clear);
-                    stm32ral::modify_reg!($ral_path, tgt, SR, UIF: Clear); // Я не знаю почему, но настоящей STMке без этого не работает.
                 }
             }
         }

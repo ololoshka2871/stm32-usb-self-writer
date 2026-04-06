@@ -20,10 +20,9 @@ macro_rules! freqmeter_dma_interrupt {
     (
         buffer: $buffer:expr,
         capture_tx: $capture_tx:expr,
-        target_rx: $target_rx:expr,
         capturer: $capturer:expr,
         transfer: $transfer:expr,
-        cgifX: $cgifX:ident
+        target_rx: $target_rx:expr,
     ) => {{
         use stm32_usb_self_writer::sensors::freqmeter::FreqmeterDmaChannelExt;
 
@@ -50,6 +49,7 @@ macro_rules! build_freqmeter {
         dma_channel=$dma_channel:expr,
         master_timer=$master_timer:expr,
         master_type=$master_type:ty,
+        power_pin=$power_pin:expr,
         dp=$dp:ident,
         stop_reg=$stop_reg:ident,
         stop_bit=$stop_bit:ident
@@ -61,17 +61,16 @@ macro_rules! build_freqmeter {
 
         let mut capturer = $master_timer.make_capturer($input_timer);
 
-        #[cfg(debug_assertions)]
         $dp.DBGMCU.$stop_reg.modify(|_, w| w.$stop_bit().set_bit());
 
         let buffer = unsafe { cortex_m::singleton!(: $master_type = 0).unwrap_unchecked() };
 
         let mut dma_transfer = $dma_channel;
-        dma_transfer.freqmeter_configure(buffer as *const _ as u32, capturer.address());
+        dma_transfer.configure_tim_up(buffer as *const _ as u32, capturer.address());
 
         capturer.start(config::INITIAL_FREQMETER_TARGET);
 
-        let freqmeter = Freqmeter::new();
+        let freqmeter = Freqmeter::with_power_pin($power_pin);
 
         (
             freqmeter,
@@ -82,4 +81,79 @@ macro_rules! build_freqmeter {
             rtic_sync::make_channel!(u16, 1),
         )
     }};
+}
+
+#[macro_export]
+macro_rules! freqmeter {
+    (
+        channel=$channel:expr,
+        capture_rx=$capture_rx:expr,
+        freqmeter=$freqmeter:expr,
+        //data_storage=$data_storage:expr,
+        transfer_fin=$transfer_fin:expr,
+        f_capturer=$f_capturer:expr,
+        f_ref=$f_ref:expr,
+        target_tx=$target_tx:expr,
+    ) => {
+        //let get_measure_settings = move |data_storage: &mut &mut data_storage::DataStorage| {
+        //    (
+        //        data_storage.holdings.get_measure_time($channel) as u64,
+        //        data_storage.holdings.get_f_ref().hz(),
+        //        data_storage.holdings.get_pwm_freq($channel),
+        //    )
+        //};
+
+        let mut transfer_fin = $transfer_fin;
+        let mut f_capturer = $f_capturer;
+
+        //let (mut measure_time, mut f_ref, mut f_pwm) = $data_storage.lock(get_measure_settings);
+
+        let f_ref = $f_ref;
+        let measure_time = 20;
+
+        loop {
+            match Mono::timeout_after(measure_time.millis() * 2, $capture_rx.recv()).await {
+                Ok(Ok(c)) => {
+                    defmt::trace!("{}: Got capture: {}", $channel, c);
+                    if let Some((f, result)) = $freqmeter.feed(c, f_ref) {
+                        defmt::debug!("{}: Freq: {} Hz, result: {}", $channel, f, result);
+                        //$data_storage.lock(move |data_storage| {
+                        //    data_storage.update_frequency($channel, f, c.target as u32, result)
+                        //});
+                        let new_target = $freqmeter.calc_new_target(
+                            f,
+                            measure_time.millis(),
+                            config::INITIAL_FREQMETER_TARGET,
+                        );
+                        defmt::info!("{}: New target: {}", $channel, new_target);
+                        (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
+                            transfer.stop();
+                            capturer.stop();
+                        });
+                        $freqmeter.reset();
+                        $target_tx.send(new_target).await.ok();
+                    }
+                }
+                Ok(Err(_)) => {
+                    panic!("Capture channel closed");
+                }
+                Err(_e) => {
+                    defmt::warn!("{}: Capture timeout, restarting...", $channel);
+                    (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
+                        transfer.stop();
+                        capturer.stop();
+                        capturer.start(config::INITIAL_FREQMETER_TARGET);
+                        transfer.start();
+                    });
+                    $freqmeter.reset();
+                    //$data_storage.lock(move |data_storage| {
+                    //    data_storage.update_frequency($channel, f32::NAN, 0, 0)
+                    //});
+                }
+            }
+
+            // update measure time
+            //(measure_time, f_ref, f_pwm) = $data_storage.lock(get_measure_settings);
+        }
+    };
 }

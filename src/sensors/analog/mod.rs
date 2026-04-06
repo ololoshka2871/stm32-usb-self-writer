@@ -9,8 +9,8 @@ pub struct AnalogSensor<BP> {
     vbat_pin: BP,
 }
 
-impl<BATTERY_PIN: Send + Channel> AnalogSensor<BATTERY_PIN> {
-    pub fn new(mut adc: ADC, vbat_pin: BATTERY_PIN, delay: &mut impl DelayUs<u32>) -> Self {
+impl<BP: Send + Channel> AnalogSensor<BP> {
+    pub fn new(mut adc: ADC, vbat_pin: BP, delay: &mut impl DelayUs<u32>) -> Self {
         adc.set_sample_time(SampleTime::Cycles640_5);
         adc.set_resolution(Resolution::Bits12);
 
