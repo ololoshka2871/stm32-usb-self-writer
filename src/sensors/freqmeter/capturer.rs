@@ -27,15 +27,17 @@ impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> Capturer<TIM, IN_T
     }
 
     pub fn start(&mut self, new_target: u16) {
+        self.stop();
         self.current_target = new_target;
-        self.input.load_max();
         self.input.load_target(new_target - 1);
+        self.input.load(new_target - 2);
         self.input.enable();
     }
 
     pub fn restart(&mut self) {
-        self.input.load_max();
+        self.stop();
         self.input.load_target(self.current_target - 1);
+        self.input.load(self.current_target - 2);
         self.input.enable();
     }
 

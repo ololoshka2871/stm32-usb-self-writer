@@ -46,7 +46,7 @@ macro_rules! master_timer {
                     stm32ral::modify_reg!($ral_path, tgt, DIER, UIE: Enabled);
                 }
 
-                pub unsafe fn overflow(&mut self) {
+                pub unsafe fn overflow_isr(&mut self) {
                     // increment extender
                     self.0.write_volatile(self.0.read_volatile().wrapping_add(1));
 

@@ -49,9 +49,8 @@ impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> InputCounter<TIM, 
         self.tim.reset_counter();
     }
 
-    pub fn load_max(&mut self) {
-        self.tim.set_auto_reload(u16::MAX);
-        self.tim.reset_counter();
+    pub fn load(&mut self, cnt_value: u16) {
+        self.tim.write_count(cnt_value);
     }
 
     pub fn enable(&mut self) {

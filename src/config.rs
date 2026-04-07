@@ -71,6 +71,10 @@ pub const LED_ENABLE: PinState = PinState::Low;
 
 //-----------------------------------------------------------------------------
 
+pub const BASE_INTERVAL_MIN_MS: u64 = 20;
+
+//-----------------------------------------------------------------------------
+
 pub const MINIMUM_ADAPTATION_INTERVAL: u32 = 50;
 pub const MEASURE_TIME_TO_GUARD_MULTIPLIER: f32 = 1.5;
 pub const MIN_GUARD_TIME: f64 = 100.0;

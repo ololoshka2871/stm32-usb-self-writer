@@ -24,9 +24,9 @@ macro_rules! impl_freqmeter_dma_channel {
                     w.pl()
                         .very_high()
                         .msize()
-                        .bits32()
+                        .bits16()
                         .psize()
-                        .bits32()
+                        .bits16()
                         .circ()
                         .set_bit()
                         .dir()
@@ -38,15 +38,12 @@ macro_rules! impl_freqmeter_dma_channel {
                 });
 
                 self.listen(Event::TransferComplete);
-                self.start();
             }
 
             fn accept_isr(&mut self) {
-                self.stop();
                 unsafe {
                     (*DMA1::ptr()).ifcr.write(|w| w.$cgif_fn().set_bit());
                 }
-                self.start();
             }
         }
     };

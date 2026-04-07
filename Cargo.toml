@@ -15,6 +15,7 @@ lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 vcell = "0.1.3"
 bitflags = "1.3.2"
 futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+no-std-async = "1.1"
 umm-malloc = { version = "0.3.2", features = ["cortex-m-interrupt-critical-section"] }
 
 embedded-hal = { version = "0.2.7", features = ["unproven"] }
