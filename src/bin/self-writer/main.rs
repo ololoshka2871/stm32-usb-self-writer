@@ -16,7 +16,7 @@ use stm32l4xx_hal::{
 };
 
 use rtic::app;
-use rtic_monotonics::{fugit::ExtU64, Monotonic};
+use rtic_monotonics::{Monotonic, fugit::{Duration, ExtU64}};
 use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
@@ -45,11 +45,16 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
+    
+
     use super::*;
 
     #[shared]
     struct Shared {
         rtc: RtcService,
+        base_period: Duration<u64, 1, {config::SYST_TIMER_HZ}>,
+        f1_base_period_devider: u32,
+        f2_base_period_devider: u32,
         rtc_event: no_std_async::Condvar,
 
         master_counter_freq: stm32l4xx_hal::time::Hertz,
@@ -78,11 +83,6 @@ mod app {
         f2_capture_buffer: &'static mut types::MasterCounterType,
         f2_capture_tx: Sender<'static, Capture, 1>,
         f2_capture_rx: Receiver<'static, Capture, 1>,
-
-        //f1_target_tx: Sender<'static, u16, 1>,
-        //f1_target_rx: Receiver<'static, u16, 1>,  
-        //f2_target_tx: Sender<'static, u16, 1>,
-        //f2_target_rx: Receiver<'static, u16, 1>,
     }
 
     #[init]
@@ -135,6 +135,8 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.hclk().0);
         defmt::info!("\tSysTick");
 
+        let base_period = 100.millis();
+
         let (mut rtc, rtc_clock_source) = RtcService::init(
             dp.RTC,
             &mut dp.EXTI,
@@ -142,7 +144,7 @@ mod app {
             &mut rcc.bdcr,
             &mut pwr.cr1,
         );
-        rtc.set_alarm_period_ms(1_000);
+        rtc.set_alarm_period_ms(base_period.to_millis() as u32);
         defmt::info!(
             "\tRTC initialized, source: {}",
             defmt::Debug2Format(&rtc_clock_source)
@@ -197,7 +199,6 @@ mod app {
             f1_capturer,
             f1_capture_buffer,
             (f1_capture_tx, f1_capture_rx),
-            //(f1_target_tx, f1_target_rx),
         ) = stm32_usb_self_writer::build_freqmeter!(
             input_timer = dp
                 .TIM1
@@ -227,7 +228,6 @@ mod app {
             f2_capturer,
             f2_capture_buffer,
             (f2_capture_tx, f2_capture_rx),
-            //(f2_target_tx, f2_target_rx),
         ) = stm32_usb_self_writer::build_freqmeter!(
             input_timer = dp
                 .TIM2
@@ -260,7 +260,7 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
+        //sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
         sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
         
         //regular_test::spawn().expect("Failed to spawn regular test task");
@@ -272,6 +272,9 @@ mod app {
         (
             Shared {
                 rtc,
+                base_period,
+                f1_base_period_devider: 1,
+                f2_base_period_devider: 2,
                 rtc_event: no_std_async::Condvar::new(),
 
                 master_counter_freq,
@@ -296,11 +299,6 @@ mod app {
                 f2_capture_buffer,
                 f2_capture_tx,
                 f2_capture_rx,
-
-                //f1_target_tx,
-                //f1_target_rx,
-                //f2_target_tx,
-                //f2_target_rx,
             },
         )
     }
@@ -315,7 +313,7 @@ mod app {
     #[task(
         binds=DMA1_CH6, 
         shared = [transfer_fin1, f1_capturer], 
-        local = [f1_capture_buffer, f1_capture_tx/*, f1_target_rx*/], 
+        local = [f1_capture_buffer, f1_capture_tx], 
         priority = 3)
     ]
     fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
@@ -325,14 +323,13 @@ mod app {
             capture_tx=ctx.local.f1_capture_tx,
             capturer=ctx.shared.f1_capturer,
             transfer=ctx.shared.transfer_fin1,
-            //target_rx=ctx.local.f1_target_rx,
         );
     }
 
     #[task(
         binds=DMA1_CH2, 
         shared = [transfer_fin2, f2_capturer], 
-        local = [f2_capture_buffer, f2_capture_tx/*, f2_target_rx*/],
+        local = [f2_capture_buffer, f2_capture_tx],
         priority = 3)
     ]
     fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
@@ -342,7 +339,6 @@ mod app {
             capture_tx=ctx.local.f2_capture_tx,
             capturer=ctx.shared.f2_capturer,
             transfer=ctx.shared.transfer_fin2,
-            //target_rx=ctx.local.f2_target_rx,
         );
     }
 
@@ -362,40 +358,54 @@ mod app {
     //-------------------------------------------------------------------------
 
     #[task(
-        shared = [transfer_fin1, f1_capturer, &master_counter_freq, &rtc_event],
-        local = [f1_capture_rx, freqmeter1/*, f1_target_tx*/],
+        shared = [
+            transfer_fin1, 
+            f1_capturer, 
+            &master_counter_freq,
+            &rtc_event, 
+            &base_period, &f1_base_period_devider
+        ],
+        local = [f1_capture_rx, freqmeter1],
         priority = 1,
     )]
     async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel=InputChannel::Ch1,
             start_event=ctx.shared.rtc_event,
+            base_period=*ctx.shared.base_period,
+            base_period_devider=*ctx.shared.f1_base_period_devider,
             capture_rx=ctx.local.f1_capture_rx,
             freqmeter=ctx.local.freqmeter1,
             //data_storage=(), 
             transfer_fin=ctx.shared.transfer_fin1,
             f_capturer=ctx.shared.f1_capturer,
             f_ref=*ctx.shared.master_counter_freq,
-            //target_tx=ctx.local.f1_target_tx,
         );
     }
 
     #[task(
-        shared = [transfer_fin2, f2_capturer, &master_counter_freq, &rtc_event],
-        local = [f2_capture_rx, freqmeter2/*, f2_target_tx*/],
+        shared = [
+            transfer_fin2,
+            f2_capturer, 
+            &master_counter_freq, 
+            &rtc_event, 
+            &base_period, &f2_base_period_devider
+        ],
+        local = [f2_capture_rx, freqmeter2],
         priority = 1,
     )]
     async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel=InputChannel::Ch2,
             start_event=ctx.shared.rtc_event,
+            base_period=*ctx.shared.base_period,
+            base_period_devider=*ctx.shared.f2_base_period_devider,
             capture_rx=ctx.local.f2_capture_rx,
             freqmeter=ctx.local.freqmeter2,
             //data_storage=(), 
             transfer_fin=ctx.shared.transfer_fin2,
             f_capturer=ctx.shared.f2_capturer,
             f_ref=*ctx.shared.master_counter_freq,
-            //target_tx=ctx.local.f2_target_tx,
         );
     }
 

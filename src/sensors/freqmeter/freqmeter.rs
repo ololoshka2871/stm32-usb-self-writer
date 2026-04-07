@@ -7,21 +7,16 @@ use crate::config;
 use super::capture::Capture;
 
 pub struct Freqmeter<PIN, const FREQ_HZ: u32> {
-    start_value: Option<Capture>,
     power_pin: Option<PIN>,
 }
 
 impl<PIN: OutputPin, const FREQ_HZ: u32> Freqmeter<PIN, FREQ_HZ> {
     pub fn new() -> Self {
-        Self {
-            start_value: None,
-            power_pin: None,
-        }
+        Self { power_pin: None }
     }
 
     pub fn with_power_pin(pin: PIN) -> Self {
         Self {
-            start_value: None,
             power_pin: Some(pin),
         }
     }
@@ -36,28 +31,18 @@ impl<PIN: OutputPin, const FREQ_HZ: u32> Freqmeter<PIN, FREQ_HZ> {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.start_value = None;
-    }
-
-    pub fn feed(&mut self, capture: Capture, f_ref: Hertz) -> Option<(f32, u32)> {
-        match self.start_value {
-            Some(start) => {
-                if start.target != capture.target {
-                    self.start_value.replace(capture);
-                    None
-                } else {
-                    let result = capture.wrapping_sub(start);
-
-                    self.start_value.replace(capture);
-                    let f = (capture.target as f32 * f_ref.0 as f32) / (result as f32);
-                    Some((f, result))
-                }
-            }
-            None => {
-                self.start_value.replace(capture);
-                None
-            }
+    pub fn calc_result(
+        &self,
+        start: Capture,
+        capture: Capture,
+        f_ref: Hertz,
+    ) -> Result<(f32, u32), ()> {
+        if start.target != capture.target {
+            Err(())
+        } else {
+            let result = capture.wrapping_sub(start);
+            let f = (capture.target as f32 * f_ref.0 as f32) / (result as f32);
+            Ok((f, result))
         }
     }
 

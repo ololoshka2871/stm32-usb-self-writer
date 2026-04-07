@@ -30,16 +30,7 @@ macro_rules! freqmeter_dma_interrupt {
         let buffer = $buffer;
         let capture = $capturer.lock(move |capturer| capturer.capture(buffer));
 
-        //defmt::trace!("{}: DMA transfer complete: {}", $channel, &capture);
-
         $capture_tx.try_send(capture).ok();
-
-        //if let Ok(new_tgt) = $target_rx.try_recv() {
-        //    $capturer.lock(|capturer| {
-        //        capturer.stop();
-        //        capturer.start(new_tgt);
-        //    });
-        //}
 
         $transfer.lock(|transfer| transfer.accept_isr());
     }};
@@ -90,13 +81,14 @@ macro_rules! freqmeter {
     (
         channel=$channel:expr,
         start_event=$start_event:expr,
+        base_period=$base_period:expr,
+        base_period_devider=$base_period_devider:expr,
         capture_rx=$capture_rx:expr,
         freqmeter=$freqmeter:expr,
         //data_storage=$data_storage:expr,
         transfer_fin=$transfer_fin:expr,
         f_capturer=$f_capturer:expr,
         f_ref=$f_ref:expr,
-        //target_tx=$target_tx:expr,
     ) => {
         use stm32_usb_self_writer::sensors::freqmeter::FreqmeterDmaChannelExt;
 
@@ -116,17 +108,28 @@ macro_rules! freqmeter {
         //let (mut measure_time, mut f_ref, mut f_pwm) = $data_storage.lock(get_measure_settings);
 
         let f_ref = $f_ref;
-        let measure_time = 20;
+        let mesure_period = $base_period * $base_period_devider - 1.millis();
+        let measure_time =
+            (mesure_period - $base_period / 4).min(config::MEASURE_TIME_MAX_MS.millis());
 
         let mut target = config::INITIAL_FREQMETER_TARGET;
 
         loop {
             defmt::trace!("{}: Waiting for start event...", $channel);
-            $start_event.wait().await;
+            {
+                let mut counter = $base_period_devider - 1;
+                while counter > 0 {
+                    $start_event.wait().await;
+                    counter -= 1;
+                    if counter > 0 {
+                        Mono::delay(1.millis()).await;
+                    }
+                }
+            }
+            let start_time = Mono::now();
             defmt::trace!("{}: Starting measurement cycle", $channel);
 
             // Start channel
-            $freqmeter.reset();
             (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                 transfer.accept_isr();
                 transfer.start();
@@ -134,16 +137,13 @@ macro_rules! freqmeter {
             });
 
             // process start event with timeout
-            match Mono::timeout_after(
+            let start_capture = match Mono::timeout_after(
                 (config::BASE_INTERVAL_MIN_MS / 2).millis(),
                 capture_rx.recv(),
             )
             .await
             {
-                Ok(Ok(c)) => {
-                    defmt::debug!("{}: Got first capture: {}", $channel, c);
-                    let _ = $freqmeter.feed(c, f_ref);
-                }
+                Ok(Ok(c)) => c,
                 Ok(Err(_)) => {
                     defmt::panic!("{}: Capture channel closed", $channel);
                 }
@@ -157,25 +157,24 @@ macro_rules! freqmeter {
                     target = config::INITIAL_FREQMETER_TARGET;
                     continue;
                 }
-            }
+            };
 
             // Wait result with timeout
-            match Mono::timeout_after(measure_time.millis() * 2, capture_rx.recv()).await {
+            match Mono::timeout_at(start_time + mesure_period, capture_rx.recv()).await {
                 Ok(Ok(c)) => {
                     defmt::trace!("{}: Got second capture: {}", $channel, c);
-                    if let Some((f, result)) = $freqmeter.feed(c, f_ref) {
+                    if let Ok((f, result)) = $freqmeter.calc_result(start_capture, c, f_ref) {
                         defmt::debug!("{}: Freq: {} Hz, result: {}", $channel, f, result);
                         target = $freqmeter.calc_new_target(
                             f,
-                            measure_time.millis(),
+                            measure_time,
                             config::INITIAL_FREQMETER_TARGET,
                         );
-                        defmt::info!("{}: New target: {}", $channel, target);
+                        defmt::trace!("{}: New target: {}", $channel, target);
                         (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                             transfer.stop();
                             capturer.stop();
                         });
-                        //$target_tx.send(target).await.ok();
                     } else {
                         defmt::error!("{}: freqmeter overrun 2, reset...", $channel);
                         target = config::INITIAL_FREQMETER_TARGET;
