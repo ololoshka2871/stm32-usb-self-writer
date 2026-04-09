@@ -5,7 +5,7 @@ use stm32l4xx_hal::{
 
 pub trait FreqmeterDmaChannelExt {
     fn configure_tim_up(&mut self, memory_addr: u32, peripheral_addr: u32);
-    fn accept_isr(&mut self);
+    fn accept_isr(&self);
 }
 
 macro_rules! impl_freqmeter_dma_channel {
@@ -40,7 +40,7 @@ macro_rules! impl_freqmeter_dma_channel {
                 self.listen(Event::TransferComplete);
             }
 
-            fn accept_isr(&mut self) {
+            fn accept_isr(&self) {
                 unsafe {
                     (*DMA1::ptr()).ifcr.write(|w| w.$cgif_fn().set_bit());
                 }

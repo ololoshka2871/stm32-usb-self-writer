@@ -9,7 +9,7 @@ pub mod support;
 
 pub use crate::support::{
     interrupt_controller::IInterruptController, nop_delay::NOPDelay, InputChannel,
-    InterruptController,
+    InterruptController, power_ctrl::PowerCtrl
 };
 
 //

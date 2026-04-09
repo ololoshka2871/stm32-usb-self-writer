@@ -13,6 +13,8 @@ pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
 pub const HW_VERSION: u32 = 1;
 pub const SYST_TIMER_HZ: u32 = 100;
 
+pub type Duration = rtic_monotonics::fugit::Duration<u64, 1, { SYST_TIMER_HZ }>;
+
 //-----------------------------------------------------------------------------
 
 pub const HEAP_SIZE: usize = 1024 * 2;
@@ -98,6 +100,7 @@ pub const START_BLINK_PERIOD_MS: u32 = 500;
 
 // включать счетчики за 2 периода измерения
 pub const PREHEAT_MULTIPLIER: u32 = 2;
+pub const PREHEAT_MIN_MS: u32 = 500;
 
 // Счетчик, отскрочки включения частотомера после включения питания
 pub const F_CH_START_COUNT: u32 = 2;

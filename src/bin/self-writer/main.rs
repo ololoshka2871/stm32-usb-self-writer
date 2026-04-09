@@ -16,13 +16,13 @@ use stm32l4xx_hal::{
 };
 
 use rtic::app;
-use rtic_monotonics::{Monotonic, fugit::{Duration, ExtU64}};
+use rtic_monotonics::{Monotonic, fugit::ExtU64};
 use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
     clocking::{rtc::RtcService, ClockConfigProvider},
     config, is_usb_connected,
-    sensors::freqmeter::{Capture, Capturer, ExtInputType, Freqmeter, TimerInpitCounterExt},
+    sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     InputChannel,
 };
 
@@ -45,14 +45,12 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
-    
-
     use super::*;
 
     #[shared]
     struct Shared {
         rtc: RtcService,
-        base_period: Duration<u64, 1, {config::SYST_TIMER_HZ}>,
+        base_period: config::Duration,
         f1_base_period_devider: u32,
         f2_base_period_devider: u32,
         rtc_event: no_std_async::Condvar,
@@ -73,8 +71,8 @@ mod app {
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
 
         master_timer: types::MasterCounter,
-        freqmeter1: Freqmeter<PD13<Output<PushPull>>, { config::SYST_TIMER_HZ }>,
-        freqmeter2: Freqmeter<PD10<Output<PushPull>>, { config::SYST_TIMER_HZ }>,
+        f1_power_pin: PD13<Output<PushPull>>,
+        f2_power_pin: PD10<Output<PushPull>>,
 
         f1_capture_buffer: &'static mut types::MasterCounterType,
         f1_capture_tx: Sender<'static, Capture, 1>,
@@ -194,12 +192,11 @@ mod app {
         let dma1 = dp.DMA1.split(&mut rcc.ahb1);
 
         let (
-            mut freqmeter1,
             transfer_fin1,
             f1_capturer,
             f1_capture_buffer,
             (f1_capture_tx, f1_capture_rx),
-        ) = stm32_usb_self_writer::build_freqmeter!(
+        ) = stm32_usb_self_writer::build_freqmeter_dma!(
             input_timer = dp
                 .TIM1
                 .into_input_counter(gpioa.pa8.into_alternate_push_pull(
@@ -210,25 +207,23 @@ mod app {
             dma_channel = dma1.6, // DMA1 Channel 6[CxS=7] is connected to TIM1_UP
             master_timer = master_timer,
             master_type = types::MasterCounterType,
-            power_pin = gpiod.pd13.into_push_pull_output_in_state(
-                &mut gpiod.moder,
-                &mut gpiod.otyper,
-                config::GENERATOR_DISABLE_LVL,
-            ),
             dp = dp,
             stop_reg = apb2fzr,
             stop_bit = dbg_tim1_stop
         );
-        freqmeter1.power_ctrl(true);
+        let f1_power_pin = gpiod.pd13.into_push_pull_output_in_state(
+            &mut gpiod.moder,
+            &mut gpiod.otyper,
+            config::GENERATOR_DISABLE_LVL,
+        );
         defmt::info!("\tFreqmeter 1");
 
         let (
-            mut freqmeter2,
             transfer_fin2,
             f2_capturer,
             f2_capture_buffer,
             (f2_capture_tx, f2_capture_rx),
-        ) = stm32_usb_self_writer::build_freqmeter!(
+        ) = stm32_usb_self_writer::build_freqmeter_dma!(
             input_timer = dp
                 .TIM2
                 .into_input_counter(gpioa.pa0.into_alternate_push_pull(
@@ -239,16 +234,15 @@ mod app {
             dma_channel = dma1.2, // DMA1 Channel 2[CxS=4] is connected to TIM2_UP
             master_timer = master_timer,
             master_type = types::MasterCounterType,
-            power_pin = gpiod.pd10.into_push_pull_output_in_state(
-                &mut gpiod.moder,
-                &mut gpiod.otyper,
-                config::GENERATOR_DISABLE_LVL,
-            ),
             dp = dp,
             stop_reg = apb1fzr1,
             stop_bit = dbg_tim2_stop
         );
-        freqmeter2.power_ctrl(true);
+        let f2_power_pin = gpiod.pd10.into_push_pull_output_in_state(
+            &mut gpiod.moder,
+            &mut gpiod.otyper,
+            config::GENERATOR_DISABLE_LVL,
+        );
         defmt::info!("\tFreqmeter 2");
 
         let led = gpioc.pc10.into_push_pull_output_in_state(
@@ -260,8 +254,8 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        //sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
-        sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+        sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
+        //sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
         
         //regular_test::spawn().expect("Failed to spawn regular test task");
 
@@ -274,7 +268,7 @@ mod app {
                 rtc,
                 base_period,
                 f1_base_period_devider: 1,
-                f2_base_period_devider: 2,
+                f2_base_period_devider: 1,
                 rtc_event: no_std_async::Condvar::new(),
 
                 master_counter_freq,
@@ -290,8 +284,8 @@ mod app {
                 analog_sens,
                 master_timer,
 
-                freqmeter1,
-                freqmeter2,
+                f1_power_pin,
+                f2_power_pin,
 
                 f1_capture_buffer,
                 f1_capture_tx,
@@ -365,7 +359,7 @@ mod app {
             &rtc_event, 
             &base_period, &f1_base_period_devider
         ],
-        local = [f1_capture_rx, freqmeter1],
+        local = [f1_capture_rx, f1_power_pin],
         priority = 1,
     )]
     async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
@@ -375,11 +369,12 @@ mod app {
             base_period=*ctx.shared.base_period,
             base_period_devider=*ctx.shared.f1_base_period_devider,
             capture_rx=ctx.local.f1_capture_rx,
-            freqmeter=ctx.local.freqmeter1,
+            power_pin=ctx.local.f1_power_pin,
             //data_storage=(), 
             transfer_fin=ctx.shared.transfer_fin1,
             f_capturer=ctx.shared.f1_capturer,
             f_ref=*ctx.shared.master_counter_freq,
+            mono=Mono,
         );
     }
 
@@ -391,7 +386,7 @@ mod app {
             &rtc_event, 
             &base_period, &f2_base_period_devider
         ],
-        local = [f2_capture_rx, freqmeter2],
+        local = [f2_capture_rx, f2_power_pin],
         priority = 1,
     )]
     async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
@@ -401,11 +396,12 @@ mod app {
             base_period=*ctx.shared.base_period,
             base_period_devider=*ctx.shared.f2_base_period_devider,
             capture_rx=ctx.local.f2_capture_rx,
-            freqmeter=ctx.local.freqmeter2,
+            power_pin=ctx.local.f2_power_pin,
             //data_storage=(), 
             transfer_fin=ctx.shared.transfer_fin2,
             f_capturer=ctx.shared.f2_capturer,
             f_ref=*ctx.shared.master_counter_freq,
+            mono=Mono,
         );
     }
 
