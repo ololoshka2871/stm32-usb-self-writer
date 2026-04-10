@@ -13,8 +13,8 @@ pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
 pub const HW_VERSION: u32 = 1;
 pub const SYST_TIMER_HZ: u32 = 1_000;
 
-pub type Duration = rtic_monotonics::fugit::Duration<u64, 1, { SYST_TIMER_HZ }>;
-pub type Instant = rtic_monotonics::fugit::Instant<u64, 1, { SYST_TIMER_HZ }>;
+pub type Duration = rtic_monotonics::fugit::Duration<u32, 1, { SYST_TIMER_HZ }>;
+pub type Instant = rtic_monotonics::fugit::Instant<u32, 1, { SYST_TIMER_HZ }>;
 
 //-----------------------------------------------------------------------------
 
@@ -74,17 +74,17 @@ pub const LED_ENABLE: PinState = PinState::Low;
 
 //-----------------------------------------------------------------------------
 
-pub const BASE_INTERVAL_MIN_MS: u64 = 20;
+pub const BASE_INTERVAL_MIN_MS: u32 = 20;
 
 //-----------------------------------------------------------------------------
 
 pub const MINIMUM_ADAPTATION_INTERVAL: u32 = 50;
 pub const MEASURE_TIME_TO_GUARD_MULTIPLIER: f32 = 1.5;
 pub const MIN_GUARD_TIME: f64 = 100.0;
-pub const MEASURE_TIME_MAX_MS: u64 = 1000;
+pub const MEASURE_TIME_MAX_MS: u32 = 1000;
 /// Запас на которое время измерения меньше дедлайна, из него вычисляется цель
 /// Если используется DEFMT_LOG = "trace", увеличить до 10 в режиме самописца!
-pub const MAKE_MEASURE_TIME_ZAPAS_MS: u64 = 5;
+pub const MAKE_MEASURE_TIME_ZAPAS_MS: u32 = 5;
 
 //-----------------------------------------------------------------------------
 

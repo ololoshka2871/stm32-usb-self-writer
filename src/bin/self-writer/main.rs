@@ -16,7 +16,7 @@ use stm32l4xx_hal::{
 };
 
 use rtic::app;
-use rtic_monotonics::{Monotonic, fugit::ExtU64};
+use rtic_monotonics::{Monotonic, fugit::ExtU32};
 use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
@@ -34,8 +34,8 @@ rtic_monotonics::systick_monotonic!(Mono, config::SYST_TIMER_HZ);
 //-----------------------------------------------------------------------------
 
 defmt::timestamp!(
-    "[T{=u64:ms}]",
-    Mono::now().ticks() * (1_000 / config::SYST_TIMER_HZ as u64)
+    "[T{=u32:ms}]",
+    Mono::now().ticks() * (1_000 / config::SYST_TIMER_HZ)
 );
 
 //-----------------------------------------------------------------------------
@@ -145,11 +145,11 @@ mod app {
         let config = settings.ref_mut().0;
         let write_config = &config.write_config;
 
-        let base_period = config::Duration::millis(write_config.base_interval_ms as u64);
+        let base_period = config::Duration::millis(write_config.base_interval_ms);
         let start_delay = config::Duration::secs(if high_perf_mode {
             0
         } else {
-            config.start_delay as u64
+            config.start_delay
         });
         defmt::info!("\tSettings loaded, base period: {} ms, start delay: {} s", write_config.base_interval_ms, start_delay.to_secs());
 
@@ -330,7 +330,7 @@ mod app {
         binds=DMA1_CH6, 
         shared = [transfer_fin1, f1_capturer], 
         local = [f1_capture_buffer, f1_capture_tx], 
-        priority = 3)
+        priority = 4)
     ]
     fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
@@ -346,7 +346,7 @@ mod app {
         binds=DMA1_CH2, 
         shared = [transfer_fin2, f2_capturer], 
         local = [f2_capture_buffer, f2_capture_tx],
-        priority = 3)
+        priority = 4)
     ]
     fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
@@ -358,7 +358,8 @@ mod app {
         );
     }
 
-    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 1)]
+    // Приоритет строго равен sync_freqmeter*, иначе Deadlock на мьютексе rtc_sync
+    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 2)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
         let rtc_sync = ctx.shared.rtc_sync;
@@ -461,7 +462,7 @@ mod app {
             let (vbat, tcpu) = analog_sens.read();
             defmt::info!("VBAT: {} V, TCPU: {} °C", vbat, tcpu);
 
-            Mono::delay(1000u64.millis()).await;
+            Mono::delay(1000u32.millis()).await;
         }
     }
 }

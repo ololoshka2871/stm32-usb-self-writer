@@ -22,19 +22,19 @@ impl<M: Monotonic<Duration = config::Duration>> FreqmeterStates<M> {
         config::Duration::millis(config::BASE_INTERVAL_MIN_MS);
     pub const MAX_MEASURE_TIME: M::Duration = config::Duration::millis(config::MEASURE_TIME_MAX_MS);
     pub const ADAPTATION_TIME: M::Duration =
-        config::Duration::millis(1_000 / config::SYST_TIMER_HZ as u64);
+        config::Duration::millis(1_000 / config::SYST_TIMER_HZ);
     pub const MIN_PREHEAT_TIME: M::Duration =
-        config::Duration::millis(config::PREHEAT_MIN_MS as u64);
+        config::Duration::millis(config::PREHEAT_MIN_MS);
     pub const MAX_PREHEAT_TIME: M::Duration =
-        config::Duration::millis(config::PREHEAT_MULTIPLIER as u64 * config::BASE_INTERVAL_MIN_MS);
+        config::Duration::millis(config::PREHEAT_MULTIPLIER * config::BASE_INTERVAL_MIN_MS);
 
     pub const MIN_WARM_STARTUP_TIME: M::Duration = config::Duration::millis(
-        config::BASE_INTERVAL_MIN_MS + (1_000 / config::SYST_TIMER_HZ as u64),
+        config::BASE_INTERVAL_MIN_MS + (1_000 / config::SYST_TIMER_HZ),
     );
     pub const MIN_COLD_STARTUP_TIME: M::Duration = config::Duration::millis(
-        config::PREHEAT_MIN_MS as u64
+        config::PREHEAT_MIN_MS
             + config::BASE_INTERVAL_MIN_MS
-            + (1_000 / config::SYST_TIMER_HZ as u64),
+            + (1_000 / config::SYST_TIMER_HZ),
     );
 
     pub fn init(startup_delay: config::Duration) -> Self {

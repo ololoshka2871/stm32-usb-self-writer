@@ -38,7 +38,7 @@ impl<M: Monotonic<Duration = config::Duration>> RtcSync<M> {
         }
     }
 
-    pub fn until_deadline_millis(&self, deadline: M::Instant) -> u64 {
+    pub fn until_deadline_millis(&self, deadline: M::Instant) -> u32 {
         let now = M::now();
         if deadline > now {
             (deadline - now).to_millis()

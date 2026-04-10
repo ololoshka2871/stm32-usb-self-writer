@@ -11,7 +11,6 @@ num = { version = "0.4", default-features = false, features = ["alloc"] }
 num-derive = "0.4"
 num-traits = { version = "0.2", default-features = false }
 static_assertions = "1.1.0"
-lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 vcell = "0.1.3"
 bitflags = "1.3.2"
 futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
@@ -35,7 +34,7 @@ usbd_mass_storage = { git = "https://github.com/ololoshka2871/stm32-usb.rs.git",
 
 rtic = { version = "2.1", features = ["rtic-monotonics"] }
 rtic-sync = { version = "=1.3.1-alpha.1" }
-rtic-monotonics = { version = "2.0", features = ["cortex-m-systick", "systick-64bit"] }
+rtic-monotonics = { version = "2.0", features = ["cortex-m-systick"] }
 
 # defmt
 defmt = "1"
@@ -56,6 +55,13 @@ my-proc-macro = { path = "lib/my-proc-macro" }
 qspi-stm32lx3 = { path = "lib/qspi_stm32l4x3" }
 
 prost = { version = "0.13", default-features = false, features = ["derive"] }
+
+# special
+
+# Используется в no-std-async для мьютекса. 
+# use_ticket_mutex - использовать реализацию на основе ticket mutex,
+# которая не может вызвать priority inversion, в отличие от spinlock.
+spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex"] }
 
 [build-dependencies]
 prost-build = "0.13"

@@ -224,9 +224,9 @@ macro_rules! freqmeter {
                     deadline,
                 } => {
                     defmt::trace!(
-                        "{}: Freqmeter: Measure, dedline at T={=u64:ms}, remaining: {} ms",
+                        "{}: Freqmeter: Measure, dedline at T={=u32:ms}, remaining: {} ms",
                         $channel,
-                        deadline.ticks() * (1_000 / config::SYST_TIMER_HZ as u64),
+                        deadline.ticks() * (1_000 / config::SYST_TIMER_HZ),
                         rtc_sync.until_deadline_millis(deadline)
                     );
 

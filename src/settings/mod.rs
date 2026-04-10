@@ -69,7 +69,7 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     t_zero_correction: 0.0,
 
     write_config: app_settings::WriteConfig {
-        base_interval_ms: 100,
+        base_interval_ms: 20,
         p_write_devider: 1,
         t_write_devider: 1,
     },
