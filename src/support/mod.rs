@@ -3,10 +3,11 @@ pub mod hex_slice;
 pub mod interrupt_controller;
 pub mod led;
 pub mod len_in_u64_aligned;
-pub mod usb_connection_checker;
-pub mod vusb_monitor;
 pub mod nop_delay;
 pub mod power_ctrl;
+pub mod rtc_sync;
+pub mod usb_connection_checker;
+pub mod vusb_monitor;
 
 #[cfg(feature = "stm32l433")]
 mod interrupt_controller_l433;

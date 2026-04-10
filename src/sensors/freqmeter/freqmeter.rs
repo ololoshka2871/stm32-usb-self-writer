@@ -1,4 +1,3 @@
-use rtic_monotonics::fugit::TimerDurationU64;
 use stm32l4xx_hal::time::Hertz;
 
 use super::capture::Capture;

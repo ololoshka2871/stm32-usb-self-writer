@@ -8,8 +8,8 @@ pub mod sensors;
 pub mod support;
 
 pub use crate::support::{
-    interrupt_controller::IInterruptController, nop_delay::NOPDelay, InputChannel,
-    InterruptController, power_ctrl::PowerCtrl
+    interrupt_controller::IInterruptController, nop_delay::NOPDelay, power_ctrl::PowerCtrl,
+    rtc_sync::RtcSync, InputChannel, InterruptController,
 };
 
 //

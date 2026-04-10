@@ -11,9 +11,10 @@ pub const XTAL_FREQ: u32 = 12_000_000;
 pub const HIGH_PERF_CPU_FREQ: u32 = 80_000_000;
 pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
 pub const HW_VERSION: u32 = 1;
-pub const SYST_TIMER_HZ: u32 = 100;
+pub const SYST_TIMER_HZ: u32 = 1000;
 
 pub type Duration = rtic_monotonics::fugit::Duration<u64, 1, { SYST_TIMER_HZ }>;
+pub type Instant = rtic_monotonics::fugit::Instant<u64, 1, { SYST_TIMER_HZ }>;
 
 //-----------------------------------------------------------------------------
 
@@ -81,6 +82,9 @@ pub const MINIMUM_ADAPTATION_INTERVAL: u32 = 50;
 pub const MEASURE_TIME_TO_GUARD_MULTIPLIER: f32 = 1.5;
 pub const MIN_GUARD_TIME: f64 = 100.0;
 pub const MEASURE_TIME_MAX_MS: u64 = 1000;
+/// Запас на которое время измерения меньше дедлайна, из него вычисляется цель
+/// Если используется DEFMT_LOG = "trace", увеличить до 10 в режиме самописца!
+pub const MAKE_MEASURE_TIME_ZAPAS_MS: u64 = 5;
 
 //-----------------------------------------------------------------------------
 

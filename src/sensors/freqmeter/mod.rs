@@ -35,6 +35,8 @@ macro_rules! freqmeter_dma_interrupt {
         $capture_tx.try_send(capture).ok();
 
         $transfer.lock(|transfer| transfer.accept_isr());
+
+        defmt::trace!("{}: DMA transfer complete", $channel);
     }};
 }
 
@@ -76,7 +78,7 @@ macro_rules! build_freqmeter_dma {
 macro_rules! freqmeter {
     (
         channel=$channel:expr,
-        start_event=$start_event:expr,
+        rtc_sync=$rtc_sync:expr,
         base_period=$base_period:expr,
         base_period_devider=$base_period_devider:expr,
         capture_rx=$capture_rx:expr,
@@ -108,6 +110,8 @@ macro_rules! freqmeter {
         let mut f_capturer = $f_capturer;
         let mut capture_rx = $capture_rx;
 
+        let rtc_sync = $rtc_sync;
+
         //let mut start_channel = |target| {
         //    (transfer_fin.get(), f_capturer.get()).lock(|transfer, capturer| {
         //        transfer.accept_isr();
@@ -127,39 +131,35 @@ macro_rules! freqmeter {
         let mut current_state = FreqmeterStates::<$mono>::init(start_delay);
         loop {
             match current_state {
-                FreqmeterStates::PowerOff { remaining } => {
-                    let now = <$mono>::now();
+                FreqmeterStates::PowerOff { deadline } => {
                     defmt::trace!(
-                        "{}: Freqmeter: PowerOff, remaining: {} ms",
+                        "{}: Freqmeter: PowerOff, remaning: {} ms",
                         $channel,
-                        remaining.to_millis()
+                        rtc_sync.until_deadline_millis(deadline)
                     );
                     power_pin.power_ctrl(false);
-                    <$mono>::delay(remaining - FreqmeterStates::<$mono>::MIN_COLD_STARTUP_TIME)
-                        .await;
-                    let elapsed = <$mono>::now() - now;
-                    current_state = FreqmeterStates::<$mono>::Preheating {
-                        remaining: remaining - elapsed,
-                    };
+                    <$mono>::delay_until(
+                        deadline - FreqmeterStates::<$mono>::MIN_COLD_STARTUP_TIME,
+                    )
+                    .await;
+                    current_state = FreqmeterStates::<$mono>::Preheating { deadline };
                 }
-                FreqmeterStates::Preheating { remaining } => {
-                    let now = <$mono>::now();
+                FreqmeterStates::Preheating { deadline } => {
                     defmt::trace!(
                         "{}: Freqmeter: Preheating, remaining: {} ms",
                         $channel,
-                        remaining.to_millis()
+                        rtc_sync.until_deadline_millis(deadline)
                     );
                     power_pin.power_ctrl(true);
-                    <$mono>::delay(remaining - FreqmeterStates::<$mono>::MIN_PREHEAT_TIME).await;
-                    let elapsed = <$mono>::now() - now;
-                    current_state = FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                    <$mono>::delay_until(deadline - FreqmeterStates::<$mono>::MIN_PREHEAT_TIME)
+                        .await;
+                    current_state = FreqmeterStates::<$mono>::Adaptation { deadline };
                 }
-                FreqmeterStates::Adaptation { remaining } => {
-                    let now = <$mono>::now();
+                FreqmeterStates::Adaptation { deadline } => {
                     defmt::trace!(
                         "{}: Freqmeter: Adaptation, remaining: {} ms",
                         $channel,
-                        remaining.to_millis()
+                        rtc_sync.until_deadline_millis(deadline)
                     );
                     (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                         transfer.accept_isr();
@@ -168,104 +168,117 @@ macro_rules! freqmeter {
                     });
 
                     // process start event with timeout
-                    let start_capture = match <$mono>::timeout_after(
-                        (config::BASE_INTERVAL_MIN_MS / 2).millis(),
-                        capture_rx.recv(),
-                    )
-                    .await
+                    let start_capture = match rtc_sync.timeout_at(deadline, capture_rx.recv()).await
                     {
-                        Ok(Ok(c)) => c,
+                        Ok(Ok(c)) => c, // success
                         Ok(Err(_)) => {
                             defmt::panic!("{}: Capture channel closed", $channel);
                         }
                         Err(_e) => {
-                            defmt::warn!("{}: Capture timeout, channel down, reset...", $channel);
+                            defmt::warn!(
+                                "{}: Adaptation: Capture timeout, channel down, reset...",
+                                $channel
+                            );
                             // Stop channel
                             (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                 capturer.stop();
                                 transfer.stop();
                                 while let Ok(_) = capture_rx.try_recv() {}
                             });
-                            let elapsed = <$mono>::now() - now;
-                            current_state =
-                                FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                            current_state = FreqmeterStates::<$mono>::plan_next_state(
+                                deadline,
+                                $base_period,
+                                $base_period_devider,
+                                None,
+                            );
                             continue;
                         }
                     };
 
                     // Wait result with timeout
-                    let res = <$mono>::timeout_after(
-                        (config::BASE_INTERVAL_MIN_MS / 2).millis(),
-                        capture_rx.recv(),
-                    )
-                    .await;
-
-                    let elapsed = <$mono>::now() - now;
-
-                    match res {
+                    match rtc_sync.timeout_at(deadline, capture_rx.recv()).await {
                         Ok(Ok(capture)) => {
                             defmt::trace!("{}: Got second capture: {}", $channel, capture);
                             if let Ok((f, result)) = calc_result(start_capture, capture, f_ref) {
                                 defmt::debug!(
-                                    "{}: Adaptation done, elapsed: {} ms, Freq: {} Hz",
+                                    "{}: Adaptation done, Freq: {} Hz, remaining: {} ms",
                                     $channel,
-                                    elapsed.to_millis(),
-                                    f
+                                    f,
+                                    rtc_sync.until_deadline_millis(deadline)
                                 );
                                 (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                     transfer.stop();
                                     capturer.stop();
                                     while let Ok(_) = capture_rx.try_recv() {}
                                 });
+
+                                // successful adaptation
                                 current_state = FreqmeterStates::Measure {
                                     prev_freq: f,
-                                    remaining: remaining - elapsed,
+                                    deadline,
                                 };
+                                continue;
                             } else {
-                                defmt::error!("{}: freqmeter overrun 2, reset...", $channel);
-                                current_state =
-                                    FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                                defmt::error!(
+                                    "{}: Adaptation: freqmeter overrun 2, reset...",
+                                    $channel
+                                );
                             }
                         }
                         Ok(Err(_)) => {
                             defmt::panic!("{}: Capture channel closed", $channel);
                         }
                         Err(_e) => {
-                            defmt::warn!("{}: Capture timeout", $channel);
-                            current_state =
-                                FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                            defmt::warn!("{}: Adaptation: Capture timeout", $channel);
                         }
                     }
+
+                    // Failed: goto next measurement cycle
+                    current_state = FreqmeterStates::<$mono>::plan_next_state(
+                        deadline,
+                        $base_period,
+                        $base_period_devider,
+                        None,
+                    );
+
+                    // TODO: report failed adaptation, F = None
                 }
                 FreqmeterStates::Measure {
                     prev_freq,
-                    remaining,
+                    deadline,
                 } => {
-                    let remaining = if remaining < FreqmeterStates::<$mono>::MIN_MEASURE_TIME {
-                        remaining.max(FreqmeterStates::<$mono>::MIN_MEASURE_TIME / 2)
-                    } else {
-                        let now = <$mono>::now();
-                        $start_event.wait().await; // sync with rtc event
-                        let elapsed = <$mono>::now() - now;
-
-                        (remaining - elapsed)
-                    };
+                    defmt::trace!(
+                        "{}: Freqmeter: Measure, dedline at T={=u64:ms}, remaining: {} ms",
+                        $channel,
+                        deadline.ticks() * (1_000 / config::SYST_TIMER_HZ as u64),
+                        rtc_sync.until_deadline_millis(deadline)
+                    );
 
                     let target = calc_new_target(
                         prev_freq,
-                        remaining - FreqmeterStates::<$mono>::MIN_MEASURE_TIME / 2,
+                        rtc_sync.make_measure_time(deadline),
                         config::INITIAL_FREQMETER_TARGET,
                     );
+                    if target < 2 {
+                        defmt::error!("{}: Target too low, reset...", $channel);
+                        current_state = FreqmeterStates::<$mono>::plan_next_state(
+                            deadline,
+                            $base_period,
+                            $base_period_devider,
+                            None,
+                        );
+                        // TODO: report F = Some(prev_freq)
+                        continue;
+                    }
 
                     defmt::trace!(
                         "{}: Freqmeter: Measure, prev_freq: {}, measure_time: {} ms, target: {}",
                         $channel,
                         prev_freq,
-                        remaining.to_millis(),
+                        rtc_sync.until_deadline_millis(deadline),
                         target
                     );
 
-                    let now = <$mono>::now();
                     (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                         transfer.accept_isr();
                         transfer.start();
@@ -273,72 +286,77 @@ macro_rules! freqmeter {
                     });
 
                     // process start event with timeout
-                    let start_capture = match <$mono>::timeout_after(
-                        (config::BASE_INTERVAL_MIN_MS / 2).millis(),
-                        capture_rx.recv(),
-                    )
-                    .await
+                    let start_capture = match rtc_sync.timeout_at(deadline, capture_rx.recv()).await
                     {
-                        Ok(Ok(c)) => c,
+                        Ok(Ok(c)) => c, // success
                         Ok(Err(_)) => {
-                            defmt::panic!("{}: Capture channel closed", $channel);
+                            defmt::panic!("{}: Measure: Capture channel closed", $channel);
                         }
                         Err(_e) => {
-                            defmt::warn!("{}: Capture timeout, channel down, reset...", $channel);
+                            defmt::warn!("{}: Measure: Capture timeout, reset...", $channel);
                             // Stop channel
                             (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                 capturer.stop();
                                 transfer.stop();
                                 while let Ok(_) = capture_rx.try_recv() {}
                             });
-                            let elapsed = <$mono>::now() - now;
-                            current_state =
-                                FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                            // TODO: report F = Some(prev_freq)
+                            current_state = FreqmeterStates::<$mono>::plan_next_state(
+                                <$mono>::now(),
+                                $base_period,
+                                $base_period_devider,
+                                None,
+                            );
                             continue;
                         }
                     };
 
                     // Wait result with timeout
-                    let res = <$mono>::timeout_after(remaining, capture_rx.recv()).await;
-
-                    let elapsed = <$mono>::now() - now;
-
-                    match res {
+                    match rtc_sync.timeout_at(deadline, capture_rx.recv()).await {
                         Ok(Ok(capture)) => {
-                            defmt::trace!("{}: Got second capture: {}", $channel, capture);
+                            defmt::trace!("{}: Measure: Got second capture: {}", $channel, capture);
                             if let Ok((f, result)) = calc_result(start_capture, capture, f_ref) {
-                                defmt::debug!(
-                                    "{}: Measurment done: {} ms, Freq: {} Hz",
-                                    $channel,
-                                    elapsed.to_millis(),
-                                    f
-                                );
+                                defmt::debug!("{}: Measurment done: Freq: {} Hz", $channel, f);
                                 (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                     transfer.stop();
                                     capturer.stop();
                                     while let Ok(_) = capture_rx.try_recv() {}
                                 });
-
                                 current_state = FreqmeterStates::<$mono>::plan_next_state(
+                                    deadline,
                                     $base_period,
                                     $base_period_devider,
-                                    f,
+                                    Some(f),
                                 );
+                                // TODO: report F = Some(f)
+
+                                rtc_sync.delay_until_sync(deadline).await;
+                                continue;
                             } else {
-                                defmt::error!("{}: freqmeter overrun 2, reset...", $channel);
-                                current_state =
-                                    FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                                defmt::error!(
+                                    "{}: Measure: Freqmeter overrun 2, reset...",
+                                    $channel
+                                );
                             }
                         }
                         Ok(Err(_)) => {
                             defmt::panic!("{}: Capture channel closed", $channel);
                         }
                         Err(_e) => {
-                            defmt::warn!("{}: Capture timeout", $channel);
-                            current_state =
-                                FreqmeterStates::<$mono>::adaptation(remaining, elapsed);
+                            defmt::warn!(
+                                "{}: Measure: Capture timeout, deadline reached",
+                                $channel
+                            );
                         }
                     }
+                    current_state = FreqmeterStates::<$mono>::plan_next_state(
+                        <$mono>::now(),
+                        $base_period,
+                        $base_period_devider,
+                        None,
+                    );
+
+                    // TODO: report F = Some(prev_freq)
                 }
             }
         }

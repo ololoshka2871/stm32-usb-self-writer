@@ -23,7 +23,7 @@ use stm32_usb_self_writer::{
     clocking::{rtc::RtcService, ClockConfigProvider},
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
-    InputChannel,
+    InputChannel, RtcSync,
 };
 
 //-----------------------------------------------------------------------------
@@ -53,7 +53,7 @@ mod app {
         base_period: config::Duration,
         f1_base_period_devider: u32,
         f2_base_period_devider: u32,
-        rtc_event: no_std_async::Condvar,
+        rtc_sync: RtcSync<Mono>,
 
         master_counter_freq: stm32l4xx_hal::time::Hertz,
 
@@ -269,7 +269,7 @@ mod app {
                 base_period,
                 f1_base_period_devider: 1,
                 f2_base_period_devider: 1,
-                rtc_event: no_std_async::Condvar::new(),
+                rtc_sync: RtcSync::<Mono>::new(base_period),
 
                 master_counter_freq,
 
@@ -336,17 +336,17 @@ mod app {
         );
     }
 
-    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_event], priority = 1)]
+    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 1)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
-        let rtc_event = ctx.shared.rtc_event;
+        let rtc_sync = ctx.shared.rtc_sync;
 
         rtc.lock(|rtc| rtc.handle_alarm_interrupt());
 
         // Опасность!
         // Если поток, ожидающий rtc_event не сделает любой .await до следующего 
         // rtc_event.wait().await, то он сожрет все нотификации в 1 лицо
-        rtc_event.notify_all();
+        rtc_sync.notify_all();
     }
 
     //-------------------------------------------------------------------------
@@ -356,7 +356,7 @@ mod app {
             transfer_fin1, 
             f1_capturer, 
             &master_counter_freq,
-            &rtc_event, 
+            &rtc_sync, 
             &base_period, &f1_base_period_devider
         ],
         local = [f1_capture_rx, f1_power_pin],
@@ -365,7 +365,7 @@ mod app {
     async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel=InputChannel::Ch1,
-            start_event=ctx.shared.rtc_event,
+            rtc_sync=ctx.shared.rtc_sync,
             base_period=*ctx.shared.base_period,
             base_period_devider=*ctx.shared.f1_base_period_devider,
             capture_rx=ctx.local.f1_capture_rx,
@@ -383,7 +383,7 @@ mod app {
             transfer_fin2,
             f2_capturer, 
             &master_counter_freq, 
-            &rtc_event, 
+            &rtc_sync, 
             &base_period, &f2_base_period_devider
         ],
         local = [f2_capture_rx, f2_power_pin],
@@ -392,7 +392,7 @@ mod app {
     async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel=InputChannel::Ch2,
-            start_event=ctx.shared.rtc_event,
+            rtc_sync=ctx.shared.rtc_sync,
             base_period=*ctx.shared.base_period,
             base_period_devider=*ctx.shared.f2_base_period_devider,
             capture_rx=ctx.local.f2_capture_rx,
