@@ -48,7 +48,7 @@ macro_rules! master_timer {
 
                 pub unsafe fn overflow_isr(&mut self) {
                     // increment extender
-                    self.0.write_volatile(self.0.read_volatile().wrapping_add(1));
+                    unsafe {self.0.write_volatile(self.0.read_volatile().wrapping_add(1)) };
 
                     // clear update flag
                     let tgt = unsafe { $ral_steal_tgt };

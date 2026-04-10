@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod init;
 mod types;
 
 extern crate alloc;
@@ -10,9 +11,9 @@ use panic_abort as _;
 
 use stm32l4xx_hal::{
     dma::dma1,
+    gpio::{Output, PD10, PD13, PushPull},
     pac::{TIM1, TIM2},
     prelude::*,
-    gpio::{PD10, PD13, Output, PushPull},
 };
 
 use rtic::app;
@@ -20,12 +21,15 @@ use rtic_monotonics::{Monotonic, fugit::ExtU32};
 use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
-    InputChannel, RtcSync, clocking::{ClockConfigProvider, rtc::RtcService}, 
-    config, is_usb_connected, 
-    sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt}, 
-    settings, support::crc::STM32L4Crc32
+    InputChannel, RtcSync,
+    clocking::rtc::RtcService,
+    config, is_usb_connected,
+    sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
+    settings,
+    support::crc::STM32L4Crc32,
 };
-    
+
+use init::*;
 
 //-----------------------------------------------------------------------------
 
@@ -108,24 +112,8 @@ mod app {
         let mut rcc = dp.RCC.constrain();
         let mut pwr = dp.PWR.constrain(&mut rcc.apb1r1);
 
-        let (clocks, master_counter_freq, high_perf_mode) = if fast_mode {
-            defmt::info!("\tUSB connected, starting in high performance mode");
-            (
-                types::HighPerformanceClockProvider::configure_clocks(
-                    &mut flash, &mut rcc, &mut pwr,
-                ),
-                types::HighPerformanceClockProvider::master_counter_frequency(),
-                true,
-            )
-        } else {
-            defmt::info!("\tUSB not connected, starting in recorder mode");
-            (
-                types::RecorderClockProvider::configure_clocks(&mut flash, &mut rcc, &mut pwr),
-                types::RecorderClockProvider::master_counter_frequency(),
-                false,
-            )
-        };
-        defmt::info!("\tClocks: {}", defmt::Debug2Format(&clocks));
+        let (clocks, master_counter_freq, high_perf_mode) =
+            init_clocks(fast_mode, &mut flash, &mut rcc, &mut pwr);
 
         unsafe {
             #[allow(static_mut_refs)]
@@ -138,32 +126,16 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.hclk().0);
         defmt::info!("\tSysTick");
 
-        let (mut settings, flash_policy) = settings::init(
-            flash,
-            STM32L4Crc32::new(dp.CRC.constrain(&mut rcc.ahb1)),
-        );
-        let config = settings.ref_mut().0;
-        let write_config = &config.write_config;
+        let (settings, flash_policy, base_period, start_delay, write_config) =
+            init_settings(flash, dp.CRC, &mut rcc, high_perf_mode);
 
-        let base_period = config::Duration::millis(write_config.base_interval_ms);
-        let start_delay = config::Duration::secs(if high_perf_mode {
-            0
-        } else {
-            config.start_delay
-        });
-        defmt::info!("\tSettings loaded, base period: {} ms, start delay: {} s", write_config.base_interval_ms, start_delay.to_secs());
-
-        let (mut rtc, rtc_clock_source) = RtcService::init(
+        let rtc = init_rtc_service(
+            base_period,
             dp.RTC,
             &mut dp.EXTI,
             &mut rcc.apb1r1,
             &mut rcc.bdcr,
             &mut pwr.cr1,
-        );
-        rtc.set_alarm_period_ms(base_period.to_millis() as u32);
-        defmt::info!(
-            "\tRTC initialized, source: {}",
-            defmt::Debug2Format(&rtc_clock_source)
         );
 
         #[allow(dead_code, unused_mut)]
@@ -177,44 +149,20 @@ mod app {
         #[allow(dead_code, unused_mut)]
         let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
 
-        let analog_sens = {
-            let mut delay = stm32_usb_self_writer::NOPDelay {
-                sys_clk: clocks.sysclk(),
-            };
+        let analog_sens = init_analog_sensors(
+            &clocks,
+            dp.ADC1,
+            dp.ADC_COMMON,
+            &mut rcc.ahb2,
+            &mut rcc.ccipr,
+            gpioa.pa1.into_analog(&mut gpioa.moder, &mut gpioa.pupdr),
+        );
 
-            let adc = stm32l4xx_hal::adc::ADC::new(
-                dp.ADC1,
-                dp.ADC_COMMON,
-                &mut rcc.ahb2,
-                &mut rcc.ccipr,
-                &mut delay,
-            );
-
-            let vbat_pin = gpioa.pa1.into_analog(&mut gpioa.moder, &mut gpioa.pupdr);
-
-            stm32_usb_self_writer::sensors::analog::AnalogSensor::new(adc, vbat_pin, &mut delay)
-        };
-        defmt::info!("\tAnalog sensor");
-
-        // Master timer
-        let mut master_timer = types::MasterCounter::new(stm32l4xx_hal::timer::Timer::tim6(
-            dp.TIM6,
-            1.hz(),
-            clocks,
-            &mut rcc.apb1r1,
-        ));
-
-        master_timer.listen();
-        defmt::info!("\tMaster timer");
+        let master_timer = init_master_timer(dp.TIM6, clocks, &mut rcc.apb1r1);
 
         let dma1 = dp.DMA1.split(&mut rcc.ahb1);
 
-        let (
-            transfer_fin1,
-            f1_capturer,
-            f1_capture_buffer,
-            (f1_capture_tx, f1_capture_rx),
-        ) = stm32_usb_self_writer::build_freqmeter_dma!(
+        let (transfer_fin1, f1_capturer, f1_capture_buffer, (f1_capture_tx, f1_capture_rx)) = stm32_usb_self_writer::build_freqmeter_dma!(
             input_timer = dp
                 .TIM1
                 .into_input_counter(gpioa.pa8.into_alternate_push_pull(
@@ -236,12 +184,7 @@ mod app {
         );
         defmt::info!("\tFreqmeter 1");
 
-        let (
-            transfer_fin2,
-            f2_capturer,
-            f2_capture_buffer,
-            (f2_capture_tx, f2_capture_rx),
-        ) = stm32_usb_self_writer::build_freqmeter_dma!(
+        let (transfer_fin2, f2_capturer, f2_capture_buffer, (f2_capture_tx, f2_capture_rx)) = stm32_usb_self_writer::build_freqmeter_dma!(
             input_timer = dp
                 .TIM2
                 .into_input_counter(gpioa.pa0.into_alternate_push_pull(
@@ -263,6 +206,20 @@ mod app {
         );
         defmt::info!("\tFreqmeter 2");
 
+        //{
+        //    let usbperith = UsbPeriph {
+        //        usb: dp.USB,
+        //        pin_dm: gpioa
+        //            .pa11
+        //            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
+        //            .set_speed(Speed::VeryHigh),
+        //        pin_dp: gpioa
+        //            .pa12
+        //            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
+        //            .set_speed(Speed::VeryHigh),
+        //    };
+        //}
+
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
             &mut gpioc.otyper,
@@ -274,7 +231,7 @@ mod app {
 
         sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
         sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
-        
+
         //regular_test::spawn().expect("Failed to spawn regular test task");
 
         defmt::info!("Tasks spawned");
@@ -285,7 +242,7 @@ mod app {
             Shared {
                 rtc,
                 base_period,
-                start_delay: config::Duration::secs(2),
+                start_delay,
                 f1_base_period_devider: write_config.p_write_devider,
                 f2_base_period_devider: write_config.t_write_devider,
                 rtc_sync: RtcSync::<Mono>::new(base_period),
@@ -327,34 +284,34 @@ mod app {
     }
 
     #[task(
-        binds=DMA1_CH6, 
-        shared = [transfer_fin1, f1_capturer], 
-        local = [f1_capture_buffer, f1_capture_tx], 
+        binds=DMA1_CH6,
+        shared = [transfer_fin1, f1_capturer],
+        local = [f1_capture_buffer, f1_capture_tx],
         priority = 4)
     ]
     fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
-            channel=InputChannel::Ch1,
-            buffer=**ctx.local.f1_capture_buffer,
-            capture_tx=ctx.local.f1_capture_tx,
-            capturer=ctx.shared.f1_capturer,
-            transfer=ctx.shared.transfer_fin1,
+            channel = InputChannel::Ch1,
+            buffer = **ctx.local.f1_capture_buffer,
+            capture_tx = ctx.local.f1_capture_tx,
+            capturer = ctx.shared.f1_capturer,
+            transfer = ctx.shared.transfer_fin1,
         );
     }
 
     #[task(
-        binds=DMA1_CH2, 
-        shared = [transfer_fin2, f2_capturer], 
+        binds=DMA1_CH2,
+        shared = [transfer_fin2, f2_capturer],
         local = [f2_capture_buffer, f2_capture_tx],
         priority = 4)
     ]
     fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
-            channel=InputChannel::Ch2,
-            buffer=**ctx.local.f2_capture_buffer,
-            capture_tx=ctx.local.f2_capture_tx,
-            capturer=ctx.shared.f2_capturer,
-            transfer=ctx.shared.transfer_fin2,
+            channel = InputChannel::Ch2,
+            buffer = **ctx.local.f2_capture_buffer,
+            capture_tx = ctx.local.f2_capture_tx,
+            capturer = ctx.shared.f2_capturer,
+            transfer = ctx.shared.transfer_fin2,
         );
     }
 
@@ -367,7 +324,7 @@ mod app {
         rtc.lock(|rtc| rtc.handle_alarm_interrupt());
 
         // Опасность!
-        // Если поток, ожидающий rtc_event не сделает любой .await до следующего 
+        // Если поток, ожидающий rtc_event не сделает любой .await до следующего
         // rtc_event.wait().await, то он сожрет все нотификации в 1 лицо
         rtc_sync.notify_all();
     }
@@ -376,10 +333,10 @@ mod app {
 
     #[task(
         shared = [
-            transfer_fin1, 
-            f1_capturer, 
+            transfer_fin1,
+            f1_capturer,
             &master_counter_freq,
-            &rtc_sync, 
+            &rtc_sync,
             &base_period, &f1_base_period_devider,
             &start_delay,
         ],
@@ -388,26 +345,26 @@ mod app {
     )]
     async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
-            channel=InputChannel::Ch1,
-            start_delay=*ctx.shared.start_delay,
-            rtc_sync=ctx.shared.rtc_sync,
-            base_period=*ctx.shared.base_period,
-            base_period_devider=*ctx.shared.f1_base_period_devider,
-            capture_rx=ctx.local.f1_capture_rx,
-            power_pin=ctx.local.f1_power_pin,
-            transfer_fin=ctx.shared.transfer_fin1,
-            f_capturer=ctx.shared.f1_capturer,
-            f_ref=*ctx.shared.master_counter_freq,
-            mono=Mono,
+            channel = InputChannel::Ch1,
+            start_delay = *ctx.shared.start_delay,
+            rtc_sync = ctx.shared.rtc_sync,
+            base_period = *ctx.shared.base_period,
+            base_period_devider = *ctx.shared.f1_base_period_devider,
+            capture_rx = ctx.local.f1_capture_rx,
+            power_pin = ctx.local.f1_power_pin,
+            transfer_fin = ctx.shared.transfer_fin1,
+            f_capturer = ctx.shared.f1_capturer,
+            f_ref = *ctx.shared.master_counter_freq,
+            mono = Mono,
         );
     }
 
     #[task(
         shared = [
             transfer_fin2,
-            f2_capturer, 
-            &master_counter_freq, 
-            &rtc_sync, 
+            f2_capturer,
+            &master_counter_freq,
+            &rtc_sync,
             &base_period, &f2_base_period_devider,
             &start_delay,
         ],
@@ -416,17 +373,17 @@ mod app {
     )]
     async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
-            channel=InputChannel::Ch2,
-            start_delay=*ctx.shared.start_delay,
-            rtc_sync=ctx.shared.rtc_sync,
-            base_period=*ctx.shared.base_period,
-            base_period_devider=*ctx.shared.f2_base_period_devider,
-            capture_rx=ctx.local.f2_capture_rx,
-            power_pin=ctx.local.f2_power_pin,
-            transfer_fin=ctx.shared.transfer_fin2,
-            f_capturer=ctx.shared.f2_capturer,
-            f_ref=*ctx.shared.master_counter_freq,
-            mono=Mono,
+            channel = InputChannel::Ch2,
+            start_delay = *ctx.shared.start_delay,
+            rtc_sync = ctx.shared.rtc_sync,
+            base_period = *ctx.shared.base_period,
+            base_period_devider = *ctx.shared.f2_base_period_devider,
+            capture_rx = ctx.local.f2_capture_rx,
+            power_pin = ctx.local.f2_power_pin,
+            transfer_fin = ctx.shared.transfer_fin2,
+            f_capturer = ctx.shared.f2_capturer,
+            f_ref = *ctx.shared.master_counter_freq,
+            mono = Mono,
         );
     }
 
@@ -436,12 +393,12 @@ mod app {
     )]
     async fn settings_saver(ctx: settings_saver::Context) {
         use flash_settings_rs::StoragePolicy;
-        
+
         let mut settings = ctx.shared.settings;
         let mut flash_policy = ctx.shared.flash_policy;
 
         let copy = settings.lock(|settins| settins.ref_mut().0.clone());
-        
+
         // Это может делаться долго, поэтому отдельный поток с минимальной приоритетностью
         if let Err(e) = flash_policy.lock(move |policy| policy.store(&copy)) {
             defmt::error!("Failed to save settings: {}", defmt::Debug2Format(&e));

@@ -2,17 +2,13 @@ mod app_settings;
 mod flash_rw_polcy;
 mod store_async;
 
-pub use app_settings::AppSettings;
+pub use app_settings::*;
 use flash_settings_rs::SettingsManager;
 
-pub use flash_rw_polcy::FlasRWPolcy;
+pub use flash_rw_polcy::{FlasRWPolcy, Placeholder};
 pub use my_proc_macro::{build_day, build_month, build_year};
 
 use crate::support::crc::ZlibCompantCrc32;
-
-use self::{app_settings::NonStoreSettings, flash_rw_polcy::Placeholder};
-
-//pub use store_async::start_writing_settings;
 
 pub static MAX_MT: u32 = 5000;
 pub static MIN_MT: u32 = 20;
@@ -90,7 +86,7 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
 
 pub type SettingsManagerType = SettingsManager<AppSettings, NonStoreSettings>;
 
-#[link_section = ".settings.app"]
+#[unsafe(link_section = ".settings.app")]
 static SETTINGS_PLACEHOLDER: Placeholder<AppSettings> =
     unsafe { core::mem::transmute([0u8; core::mem::size_of::<Placeholder<AppSettings>>()]) };
 

@@ -1338,7 +1338,6 @@ dependencies = [
  "self-recorder-packet",
  "serde",
  "serde_json",
- "spin",
  "static_assertions",
  "stm32-usbd",
  "stm32l4xx-hal",

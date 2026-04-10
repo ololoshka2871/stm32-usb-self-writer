@@ -25,14 +25,13 @@ macro_rules! freqmeter_dma_interrupt {
         capture_tx=$capture_tx:expr,
         capturer=$capturer:expr,
         transfer=$transfer:expr,
-        //target_rx=$target_rx:expr,
     ) => {{
         use stm32_usb_self_writer::sensors::freqmeter::FreqmeterDmaChannelExt;
 
         let buffer = $buffer;
-        let capture = $capturer.lock(move |capturer| capturer.capture(buffer));
+        let capture: Capture = $capturer.lock(move |capturer| capturer.capture_master(buffer));
 
-        $capture_tx.try_send(capture).ok();
+        let _ = $capture_tx.try_send(capture);
 
         $transfer.lock(|transfer| transfer.accept_isr());
 
@@ -96,7 +95,7 @@ macro_rules! freqmeter {
         let start_delay = $start_delay;
         let f_ref = $f_ref;
 
-        let power_pin: &mut stm32_usb_self_writer::PowerCtrl = $power_pin;
+        let power_pin: &mut dyn stm32_usb_self_writer::PowerCtrl = $power_pin;
 
         let mut transfer_fin = $transfer_fin;
         let mut f_capturer = $f_capturer;

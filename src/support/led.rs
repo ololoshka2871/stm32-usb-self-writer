@@ -31,7 +31,7 @@ where
 /// extern void led_set(uint8_t state);
 /// ...
 /// unsafe { led_set(0); }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn led_set(state: u8) {
     #[allow(static_mut_refs)]
     if let Some(l) = unsafe { LED.as_mut() } {

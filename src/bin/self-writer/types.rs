@@ -2,8 +2,8 @@
 
 #[allow(unused_imports)]
 use stm32l4xx_hal::gpio::{
-    Alternate, Analog, Output, PushPull, PA0, PA1, PA2, PA3, PA6, PA7, PA8, PB0, PB1, PC10, PD10,
-    PD11, PD13, PE12,
+    Alternate, Analog, Output, PA0, PA1, PA2, PA3, PA6, PA7, PA8, PB0, PB1, PC10, PD10, PD11, PD13,
+    PE12, PushPull,
 };
 
 use stm32_usb_self_writer::{clocking::*, config};
@@ -83,5 +83,7 @@ pub type EnTPin = PD10<Output<PushPull>>;
 
 //-----------------------------------------------------------------------------
 
-pub type MasterCounter = stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::MasterCounter16;
-pub type MasterCounterType = stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::Type;
+pub type MasterCounter =
+    stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::MasterCounter16;
+pub type MasterCounterType =
+    stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::Type;

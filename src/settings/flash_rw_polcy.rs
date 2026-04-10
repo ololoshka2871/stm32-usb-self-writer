@@ -52,10 +52,9 @@ impl<T: Sized, CRC: ZlibCompantCrc32> StoragePolicy<T, flash::Error> for FlasRWP
         let len_in_u64_aligned = crate::support::len_in_u64_aligned::len_in_u64_aligned(data);
 
         prog.erase_page(self.page)?;
-        prog.write_native(
-            self.page.to_address(),
-            ::core::slice::from_raw_parts(data.as_ptr() as *const u64, len_in_u64_aligned),
-        )?;
+        prog.write_native(self.page.to_address(), unsafe {
+            core::slice::from_raw_parts(data.as_ptr() as *const u64, len_in_u64_aligned)
+        })?;
 
         prog.write_native(
             self.page.to_address() + len_in_u64_aligned * ::core::mem::size_of::<u64>(),
@@ -78,21 +77,25 @@ impl<T: Sized, CRC: ZlibCompantCrc32> StoragePolicy<T, flash::Error> for FlasRWP
         &mut self,
         data: &mut [u8],
     ) -> Result<(), flash_settings_rs::LoadError<flash::Error>> {
-        core::ptr::copy_nonoverlapping(
-            self.page.to_address() as *const _,
-            data.as_mut_ptr(),
-            data.len(),
-        );
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.page.to_address() as *const _,
+                data.as_mut_ptr(),
+                data.len(),
+            )
+        };
 
         let len_aligned = crate::support::len_in_u64_aligned::len_in_u64_aligned(data)
             * ::core::mem::size_of::<u64>();
-        let mut crc: u64 = core::mem::MaybeUninit::zeroed().assume_init();
+        let mut crc: u64 = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
 
-        core::ptr::copy_nonoverlapping(
-            (self.page.to_address() + len_aligned) as *const _,
-            &mut crc,
-            1,
-        );
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                (self.page.to_address() + len_aligned) as *const _,
+                &mut crc,
+                1,
+            )
+        };
 
         if crc != self.crc(data) as u64 {
             Err(flash_settings_rs::LoadError::ConststenceError)
