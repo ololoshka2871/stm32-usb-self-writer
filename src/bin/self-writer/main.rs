@@ -20,11 +20,12 @@ use rtic_monotonics::{Monotonic, fugit::ExtU64};
 use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
-    clocking::{rtc::RtcService, ClockConfigProvider},
-    config, is_usb_connected,
-    sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
-    InputChannel, RtcSync,
+    InputChannel, RtcSync, clocking::{ClockConfigProvider, rtc::RtcService}, 
+    config, is_usb_connected, 
+    sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt}, 
+    settings, support::crc::STM32L4Crc32
 };
+    
 
 //-----------------------------------------------------------------------------
 
@@ -51,6 +52,7 @@ mod app {
     struct Shared {
         rtc: RtcService,
         base_period: config::Duration,
+        start_delay: config::Duration,
         f1_base_period_devider: u32,
         f2_base_period_devider: u32,
         rtc_sync: RtcSync<Mono>,
@@ -62,6 +64,9 @@ mod app {
 
         transfer_fin2: dma1::C2,
         f2_capturer: Capturer<TIM2, { ExtInputType::TI1FP1 as u8 }>,
+
+        settings: settings::SettingsManagerType,
+        flash_policy: settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32>,
     }
 
     #[local]
@@ -103,7 +108,7 @@ mod app {
         let mut rcc = dp.RCC.constrain();
         let mut pwr = dp.PWR.constrain(&mut rcc.apb1r1);
 
-        let (clocks, master_counter_freq, _high_perf_mode) = if fast_mode {
+        let (clocks, master_counter_freq, high_perf_mode) = if fast_mode {
             defmt::info!("\tUSB connected, starting in high performance mode");
             (
                 types::HighPerformanceClockProvider::configure_clocks(
@@ -133,7 +138,20 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.hclk().0);
         defmt::info!("\tSysTick");
 
-        let base_period = 100.millis();
+        let (mut settings, flash_policy) = settings::init(
+            flash,
+            STM32L4Crc32::new(dp.CRC.constrain(&mut rcc.ahb1)),
+        );
+        let config = settings.ref_mut().0;
+        let write_config = &config.write_config;
+
+        let base_period = config::Duration::millis(write_config.base_interval_ms as u64);
+        let start_delay = config::Duration::secs(if high_perf_mode {
+            0
+        } else {
+            config.start_delay as u64
+        });
+        defmt::info!("\tSettings loaded, base period: {} ms, start delay: {} s", write_config.base_interval_ms, start_delay.to_secs());
 
         let (mut rtc, rtc_clock_source) = RtcService::init(
             dp.RTC,
@@ -255,7 +273,7 @@ mod app {
         //---------------------------------------------------------------------
 
         sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
-        //sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+        sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
         
         //regular_test::spawn().expect("Failed to spawn regular test task");
 
@@ -267,8 +285,9 @@ mod app {
             Shared {
                 rtc,
                 base_period,
-                f1_base_period_devider: 1,
-                f2_base_period_devider: 1,
+                start_delay: config::Duration::secs(2),
+                f1_base_period_devider: write_config.p_write_devider,
+                f2_base_period_devider: write_config.t_write_devider,
                 rtc_sync: RtcSync::<Mono>::new(base_period),
 
                 master_counter_freq,
@@ -278,6 +297,9 @@ mod app {
 
                 transfer_fin2,
                 f2_capturer,
+
+                settings,
+                flash_policy,
             },
             Local {
                 led,
@@ -357,20 +379,21 @@ mod app {
             f1_capturer, 
             &master_counter_freq,
             &rtc_sync, 
-            &base_period, &f1_base_period_devider
+            &base_period, &f1_base_period_devider,
+            &start_delay,
         ],
         local = [f1_capture_rx, f1_power_pin],
-        priority = 1,
+        priority = 2,
     )]
     async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel=InputChannel::Ch1,
+            start_delay=*ctx.shared.start_delay,
             rtc_sync=ctx.shared.rtc_sync,
             base_period=*ctx.shared.base_period,
             base_period_devider=*ctx.shared.f1_base_period_devider,
             capture_rx=ctx.local.f1_capture_rx,
             power_pin=ctx.local.f1_power_pin,
-            //data_storage=(), 
             transfer_fin=ctx.shared.transfer_fin1,
             f_capturer=ctx.shared.f1_capturer,
             f_ref=*ctx.shared.master_counter_freq,
@@ -384,25 +407,49 @@ mod app {
             f2_capturer, 
             &master_counter_freq, 
             &rtc_sync, 
-            &base_period, &f2_base_period_devider
+            &base_period, &f2_base_period_devider,
+            &start_delay,
         ],
         local = [f2_capture_rx, f2_power_pin],
-        priority = 1,
+        priority = 2,
     )]
     async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel=InputChannel::Ch2,
+            start_delay=*ctx.shared.start_delay,
             rtc_sync=ctx.shared.rtc_sync,
             base_period=*ctx.shared.base_period,
             base_period_devider=*ctx.shared.f2_base_period_devider,
             capture_rx=ctx.local.f2_capture_rx,
             power_pin=ctx.local.f2_power_pin,
-            //data_storage=(), 
             transfer_fin=ctx.shared.transfer_fin2,
             f_capturer=ctx.shared.f2_capturer,
             f_ref=*ctx.shared.master_counter_freq,
             mono=Mono,
         );
+    }
+
+    #[task(
+        shared = [settings, flash_policy],
+        priority = 1,
+    )]
+    async fn settings_saver(ctx: settings_saver::Context) {
+        use flash_settings_rs::StoragePolicy;
+        
+        let mut settings = ctx.shared.settings;
+        let mut flash_policy = ctx.shared.flash_policy;
+
+        let copy = settings.lock(|settins| settins.ref_mut().0.clone());
+        
+        // Это может делаться долго, поэтому отдельный поток с минимальной приоритетностью
+        if let Err(e) = flash_policy.lock(move |policy| policy.store(&copy)) {
+            defmt::error!("Failed to save settings: {}", defmt::Debug2Format(&e));
+        } else {
+            defmt::info!("Settings saved");
+        }
+
+        // reset device
+        cortex_m::peripheral::SCB::sys_reset();
     }
 
     #[task(local = [analog_sens], priority = 1)]

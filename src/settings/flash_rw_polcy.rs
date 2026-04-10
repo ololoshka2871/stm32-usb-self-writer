@@ -1,9 +1,7 @@
-use core::ops::DerefMut;
-
-use alloc::sync::Arc;
 use flash_settings_rs::StoragePolicy;
-use freertos_rust::{Duration, Mutex};
 use stm32l4xx_hal::flash::{self, WriteErase};
+
+use crate::support::crc::ZlibCompantCrc32;
 
 pub struct Placeholder<T> {
     _body: T,
@@ -11,18 +9,15 @@ pub struct Placeholder<T> {
 }
 
 /// https://docs.rs/stm32l4xx-hal/0.6.0/stm32l4xx_hal/flash/index.html
-pub struct FlasRWPolcy {
-    flash: Arc<Mutex<stm32l4xx_hal::flash::Parts>>,
-    crc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>,
+pub struct FlasRWPolcy<T: Sized, CRC: ZlibCompantCrc32> {
+    flash: stm32l4xx_hal::flash::Parts,
+    crc: CRC,
     page: flash::FlashPage,
+    _phantom: core::marker::PhantomData<T>,
 }
 
-impl FlasRWPolcy {
-    pub fn create<T>(
-        data: &Placeholder<T>,
-        flash: Arc<Mutex<stm32l4xx_hal::flash::Parts>>,
-        crc: Arc<Mutex<stm32l4xx_hal::crc::Crc>>,
-    ) -> Self {
+impl<T: Sized, CRC: ZlibCompantCrc32> FlasRWPolcy<T, CRC> {
+    pub fn create(data: &Placeholder<T>, flash: stm32l4xx_hal::flash::Parts, crc: CRC) -> Self {
         const PAGE0_ADDR: usize = flash::FlashPage(0).to_address();
         const PAGE_SIZE: usize = flash::FlashPage(1).to_address() - PAGE0_ADDR;
 
@@ -34,52 +29,52 @@ impl FlasRWPolcy {
             flash,
             crc,
             page: flash::FlashPage((addres - PAGE0_ADDR) / PAGE_SIZE),
+            _phantom: core::marker::PhantomData,
         }
     }
 
-    // https://docs.rs/stm32l4xx-hal/0.6.0/stm32l4xx_hal/crc/index.html
     fn crc(&mut self, data: &[u8]) -> u32 {
-        self.crc
-            .lock(Duration::infinite())
-            .map(|mut crc_guard| {
-                crc_guard.reset();
-                crc_guard.feed(data);
-                !crc_guard.result()
-            })
-            .expect("Failed to lock crc module")
+        self.crc.reset();
+        self.crc.feed(data);
+        self.crc.result()
     }
 }
 
-impl StoragePolicy<flash::Error> for FlasRWPolcy {
-    unsafe fn store(&mut self, data: &[u8]) -> Result<(), flash::Error> {
+impl<T: Sized, CRC: ZlibCompantCrc32> StoragePolicy<T, flash::Error> for FlasRWPolcy<T, CRC> {
+    unsafe fn store_bytes(&mut self, data: &[u8]) -> Result<(), flash::Error> {
         let current_crc = [self.crc(data) as u64];
 
-        self.flash
-            .lock(Duration::infinite())
-            .map(|mut flash_guard| {
-                let flash = flash_guard.deref_mut();
-                let mut prog = flash.keyr.unlock_flash(&mut flash.sr, &mut flash.cr)?;
+        let mut prog = self
+            .flash
+            .keyr
+            .unlock_flash(&mut self.flash.sr, &mut self.flash.cr)?;
 
-                let len_in_u64_aligned =
-                    crate::support::len_in_u64_aligned::len_in_u64_aligned(data);
+        let len_in_u64_aligned = crate::support::len_in_u64_aligned::len_in_u64_aligned(data);
 
-                prog.erase_page(self.page)?;
-                prog.write_native(
-                    self.page.to_address(),
-                    ::core::slice::from_raw_parts(data.as_ptr() as *const u64, len_in_u64_aligned),
-                )?;
+        prog.erase_page(self.page)?;
+        prog.write_native(
+            self.page.to_address(),
+            ::core::slice::from_raw_parts(data.as_ptr() as *const u64, len_in_u64_aligned),
+        )?;
 
-                prog.write_native(
-                    self.page.to_address() + len_in_u64_aligned * ::core::mem::size_of::<u64>(),
-                    &current_crc,
-                )?;
+        prog.write_native(
+            self.page.to_address() + len_in_u64_aligned * ::core::mem::size_of::<u64>(),
+            &current_crc,
+        )?;
 
-                Ok(())
-            })
-            .expect("Failed to lock flash")
+        Ok(())
     }
 
-    unsafe fn load(
+    fn store(&mut self, v: &T) -> Result<(), flash::Error> {
+        unsafe {
+            self.store_bytes(core::slice::from_raw_parts(
+                (v as *const T) as *const u8,
+                core::mem::size_of::<T>(),
+            ))
+        }
+    }
+
+    unsafe fn load_bytes(
         &mut self,
         data: &mut [u8],
     ) -> Result<(), flash_settings_rs::LoadError<flash::Error>> {
@@ -104,5 +99,18 @@ impl StoragePolicy<flash::Error> for FlasRWPolcy {
         } else {
             Ok(())
         }
+    }
+
+    fn load(&mut self) -> Result<T, flash_settings_rs::LoadError<flash::Error>> {
+        let mut res = unsafe { core::mem::MaybeUninit::uninit().assume_init() };
+
+        unsafe {
+            self.load_bytes(core::slice::from_raw_parts_mut(
+                (&mut res as *mut T) as *mut u8,
+                core::mem::size_of::<T>(),
+            ))
+        }?;
+
+        Ok(res)
     }
 }

@@ -5,6 +5,7 @@ extern crate alloc;
 pub mod clocking;
 pub mod config;
 pub mod sensors;
+pub mod settings;
 pub mod support;
 
 pub use crate::support::{

@@ -1,56 +1,59 @@
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
-
 use num_derive::FromPrimitive;
 use serde::Serialize;
 
 #[derive(Debug, Copy, Clone, Serialize)]
-pub(crate) struct P16Coeffs {
-    pub Fp0: f32,
-    pub Ft0: f32,
-    pub A: [f32; crate::protobuf::P_COEFFS_COUNT],
+#[serde(rename_all = "PascalCase")]
+pub struct P16Coeffs {
+    pub fp0: f32,
+    pub ft0: f32,
+    pub a: [f32; /*crate::protobuf::P_COEFFS_COUNT*/ 16],
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
-pub(crate) struct T5Coeffs {
-    pub F0: f32,
-    pub T0: f32,
-    pub C: [f32; crate::protobuf::T_COEFFS_COUNT],
+#[serde(rename_all = "PascalCase")]
+pub struct T5Coeffs {
+    pub f0: f32,
+    pub t0: f32,
+    pub c: [f32; /*crate::protobuf::T_COEFFS_COUNT*/ 5],
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
-pub(crate) struct WorkRange {
+#[serde(rename_all = "PascalCase")]
+pub struct WorkRange {
     pub minimum: f32,
     pub maximum: f32,
     pub absolute_maximum: f32,
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
-pub(crate) struct CalibrationDate {
-    pub Day: u32,
-    pub Month: u32,
-    pub Year: u32,
+#[serde(rename_all = "PascalCase")]
+pub struct CalibrationDate {
+    pub day: u32,
+    pub month: u32,
+    pub year: u32,
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
-pub(crate) struct WriteConfig {
-    pub BaseInterval_ms: u32,
-    pub PWriteDevider: u32,
-    pub TWriteDevider: u32,
+#[serde(rename_all = "PascalCase")]
+pub struct WriteConfig {
+    pub base_interval_ms: u32,
+    pub p_write_devider: u32,
+    pub t_write_devider: u32,
 }
 
 #[repr(packed(1))]
 #[derive(Debug, Copy, Clone, Serialize, Default)]
-pub(crate) struct Monitoring {
-    pub Ovarpress: bool,
-    pub Ovarheat: bool,
-    pub CPUOvarheat: bool,
-    pub OverPower: bool,
+#[serde(rename_all = "PascalCase")]
+pub struct Monitoring {
+    pub ovarpress: bool,
+    pub ovarheat: bool,
+    pub cpu_ovarheat: bool,
+    pub over_power: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, FromPrimitive)]
-pub(crate) enum PressureMeassureUnits {
-    INVALID_ZERO = 0,
+pub enum PressureMeassureUnits {
+    InvalidZero = 0,
 
     // Паскали
     Pa = 0x00220000,
@@ -62,10 +65,10 @@ pub(crate) enum PressureMeassureUnits {
     At = 0x00A10000,
 
     // мм водного столба
-    mmH20 = 0x00A20000,
+    MmH20 = 0x00A20000,
 
     // м. ртутного столба
-    mHg = 0x00A30000,
+    MHg = 0x00A30000,
 
     // Атм
     Atm = 0x00A40000,
@@ -75,50 +78,44 @@ pub(crate) enum PressureMeassureUnits {
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
-pub(crate) struct AppSettings {
-    pub Serial: u32,
-    pub PMesureTime_ms: u32,
-    pub TMesureTime_ms: u32,
+#[serde(rename_all = "PascalCase")]
+pub struct AppSettings {
+    pub serial: u32,
 
-    pub Fref: u32,
+    pub fref: u32,
 
-    pub P_enabled: bool,
-    pub T_enabled: bool,
-    pub TCPUEnabled: bool,
-    pub VBatEnabled: bool,
+    pub p_coefficients: P16Coeffs,
+    pub t_coefficients: T5Coeffs,
 
-    pub P_Coefficients: P16Coeffs,
-    pub T_Coefficients: T5Coeffs,
+    pub p_work_range: WorkRange,
+    pub t_work_range: WorkRange,
+    pub t_cpu_work_range: WorkRange,
+    pub vbat_work_range: WorkRange,
 
-    pub PWorkRange: WorkRange,
-    pub TWorkRange: WorkRange,
-    pub TCPUWorkRange: WorkRange,
-    pub VbatWorkRange: WorkRange,
-
-    pub PZeroCorrection: f32,
-    pub TZeroCorrection: f32,
+    pub p_zero_correction: f32,
+    pub t_zero_correction: f32,
 
     pub calibration_date: CalibrationDate,
 
-    pub writeConfig: WriteConfig,
+    pub write_config: WriteConfig,
 
-    pub startDelay: u32,
+    pub start_delay: u32,
 
-    pub pressureMeassureUnits: PressureMeassureUnits,
+    pub pressure_meassure_units: PressureMeassureUnits,
 
     #[serde(skip_serializing)]
-    pub password: [u8; crate::protobuf::PASSWORD_SIZE],
+    pub password: [u8; /*crate::protobuf::PASSWORD_SIZE*/ 10],
 
     pub monitoring: Monitoring,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct NonStoreSettings {
+pub struct NonStoreSettings {
     pub current_password: [u8; 10],
 }
 
 impl Monitoring {
     pub fn is_set(&self) -> bool {
-        self.Ovarpress | self.Ovarheat | self.CPUOvarheat | self.OverPower
+        self.ovarpress | self.ovarheat | self.cpu_ovarheat | self.over_power
     }
 }

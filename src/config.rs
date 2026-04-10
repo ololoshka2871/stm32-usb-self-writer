@@ -11,7 +11,7 @@ pub const XTAL_FREQ: u32 = 12_000_000;
 pub const HIGH_PERF_CPU_FREQ: u32 = 80_000_000;
 pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
 pub const HW_VERSION: u32 = 1;
-pub const SYST_TIMER_HZ: u32 = 1000;
+pub const SYST_TIMER_HZ: u32 = 1_000;
 
 pub type Duration = rtic_monotonics::fugit::Duration<u64, 1, { SYST_TIMER_HZ }>;
 pub type Instant = rtic_monotonics::fugit::Instant<u64, 1, { SYST_TIMER_HZ }>;

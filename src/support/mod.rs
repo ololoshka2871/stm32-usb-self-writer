@@ -8,6 +8,7 @@ pub mod power_ctrl;
 pub mod rtc_sync;
 pub mod usb_connection_checker;
 pub mod vusb_monitor;
+pub mod crc;
 
 #[cfg(feature = "stm32l433")]
 mod interrupt_controller_l433;

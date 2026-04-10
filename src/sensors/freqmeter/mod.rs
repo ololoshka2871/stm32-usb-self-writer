@@ -78,12 +78,12 @@ macro_rules! build_freqmeter_dma {
 macro_rules! freqmeter {
     (
         channel=$channel:expr,
+        start_delay=$start_delay:expr,
         rtc_sync=$rtc_sync:expr,
         base_period=$base_period:expr,
         base_period_devider=$base_period_devider:expr,
         capture_rx=$capture_rx:expr,
         power_pin=$power_pin:expr,
-        //data_storage=$data_storage:expr,
         transfer_fin=$transfer_fin:expr,
         f_capturer=$f_capturer:expr,
         f_ref=$f_ref:expr,
@@ -93,15 +93,7 @@ macro_rules! freqmeter {
             calc_new_target, calc_result, FreqmeterDmaChannelExt, FreqmeterStates,
         };
 
-        //let get_measure_settings = move |data_storage: &mut &mut data_storage::DataStorage| {
-        //    (
-        //        data_storage.holdings.get_measure_time($channel) as u64,
-        //        data_storage.holdings.get_f_ref().hz(),
-        //        data_storage.holdings.get_pwm_freq($channel),
-        //    )
-        //};
-
-        let start_delay = 2.secs();
+        let start_delay = $start_delay;
         let f_ref = $f_ref;
 
         let power_pin: &mut stm32_usb_self_writer::PowerCtrl = $power_pin;
@@ -111,22 +103,6 @@ macro_rules! freqmeter {
         let mut capture_rx = $capture_rx;
 
         let rtc_sync = $rtc_sync;
-
-        //let mut start_channel = |target| {
-        //    (transfer_fin.get(), f_capturer.get()).lock(|transfer, capturer| {
-        //        transfer.accept_isr();
-        //        transfer.start();
-        //        capturer.start(target);
-        //    });
-        //};
-        //let mut stop_channel = || {
-        //    (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
-        //        capturer.stop();
-        //        transfer.stop();
-        //    });
-        //};
-
-        //let (mut measure_time, mut f_ref, mut f_pwm) = $data_storage.lock(get_measure_settings);
 
         let mut current_state = FreqmeterStates::<$mono>::init(start_delay);
         loop {
