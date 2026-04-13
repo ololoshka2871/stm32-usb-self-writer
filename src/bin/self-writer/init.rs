@@ -13,7 +13,7 @@ use stm32l4xx_hal::{
 
 use stm32_usb_self_writer::{clocking::ClockConfigProvider, support::crc::STM32L4Crc32};
 use usb_device::bus::UsbBusAllocator;
-use usbd_serial::SerialPort;
+use usbd_serial::CdcAcmClass;
 
 use crate::types;
 
@@ -150,14 +150,17 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
 ) -> (
     usb_device::device::UsbDevice<'a, stm32_usbd::UsbBus<USB>>,
     (),
-    SerialPort<'a, stm32_usbd::UsbBus<USB>>,
+    CdcAcmClass<'a, stm32_usbd::UsbBus<USB>>,
 ) {
     if !is_enabled {
         defmt::info!("\tUSB not enabled, skipping USB initialization");
         return unsafe {
             (
+                #[allow(invalid_value)]
                 core::mem::MaybeUninit::zeroed().assume_init(),
+                #[allow(invalid_value)]
                 core::mem::MaybeUninit::zeroed().assume_init(),
+                #[allow(invalid_value)]
                 core::mem::MaybeUninit::zeroed().assume_init(),
             )
         };
@@ -172,7 +175,7 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     //defmt::info!("Allocating SCSI device");
     //let mut scsi = Scsi::new(
     //    bus,
-    //    64, // для устройств full speed: max_packet_size 8, 16, 32 or 64
+    //    config::BULK_MAX_PACKET_SIZE as u16, // для устройств full speed: max_packet_size 8, 16, 32 or 64
     //    EMfatStorage::new(c_str!("LOGGER")),
     //    "SCTB", // <= max 8 больших букв
     //    "SelfWriter",
@@ -181,7 +184,7 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     let scsi = ();
 
     defmt::info!("Allocating ACM device");
-    let serial = usbd_serial::SerialPort::new(bus);
+    let serial = usbd_serial::CdcAcmClass::new(bus, config::BULK_MAX_PACKET_SIZE as u16);
 
     defmt::info!("Building usb device: vid={} pid={}", &vid_pid.0, &vid_pid.1);
     let usb_dev: usb_device::prelude::UsbDevice<'a, stm32_usbd::UsbBus<USB>> =

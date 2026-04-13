@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod impls;
 mod init;
 mod types;
 
@@ -50,6 +51,8 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
+    use alloc::vec::Vec;
+
     use super::*;
 
     #[shared]
@@ -75,7 +78,7 @@ mod app {
 
         usb_dev: usb_device::device::UsbDevice<'static, stm32_usbd::UsbBus<UsbPeriph>>,
         scsi: (),
-        serial: usbd_serial::SerialPort<'static, stm32_usbd::UsbBus<UsbPeriph>>,
+        serial: usbd_serial::CdcAcmClass<'static, stm32_usbd::UsbBus<UsbPeriph>>,
         usb_notify: no_std_async::Condvar,
     }
 
@@ -94,6 +97,11 @@ mod app {
         f2_capture_buffer: &'static mut types::MasterCounterType,
         f2_capture_tx: Sender<'static, Capture, 1>,
         f2_capture_rx: Receiver<'static, Capture, 1>,
+
+        protobuf_input_rx: Receiver<'static, Vec<u8>, 4>,
+        protobuf_input_tx: Sender<'static, Vec<u8>, 4>,
+        protobuf_output_tx: Sender<'static, Vec<u8>, 1>,
+        protobuf_output_rx: Receiver<'static, Vec<u8>, 1>,
     }
 
     #[init]
@@ -234,6 +242,9 @@ mod app {
             usb_device::device::UsbVidPid(0x0483, 0x5720),
         );
 
+        let (protobuf_input_tx, protobuf_input_rx) = rtic_sync::make_channel!(Vec<u8>, 4);
+        let (protobuf_output_tx, protobuf_output_rx) = rtic_sync::make_channel!(Vec<u8>, 1);
+
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
             &mut gpioc.otyper,
@@ -243,11 +254,12 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
-        sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+        //sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
+        //sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
 
         if high_perf_mode {
             usb_task::spawn().expect("Failed to spawn usb_task task");
+            protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
         }
 
         //regular_test::spawn().expect("Failed to spawn regular test task");
@@ -296,6 +308,11 @@ mod app {
                 f2_capture_buffer,
                 f2_capture_tx,
                 f2_capture_rx,
+
+                protobuf_input_rx,
+                protobuf_input_tx,
+                protobuf_output_tx,
+                protobuf_output_rx,
             },
         )
     }
@@ -439,7 +456,20 @@ mod app {
         cortex_m::peripheral::SCB::sys_reset();
     }
 
-    #[task(shared = [&usb_notify, usb_dev, scsi, serial, led], priority = 1)]
+    #[task(
+        shared = [
+            &usb_notify,
+            usb_dev,
+            scsi,
+            serial,
+            led
+        ],
+        local = [
+            protobuf_input_tx,
+            protobuf_output_rx,
+        ],
+        priority = 1
+    )]
     async fn usb_task(ctx: usb_task::Context) {
         let usb_notify = ctx.shared.usb_notify;
 
@@ -447,6 +477,9 @@ mod app {
         let mut scsi = ctx.shared.scsi;
         let mut serial = ctx.shared.serial;
         let mut led = ctx.shared.led;
+
+        let protobuf_input_tx = ctx.local.protobuf_input_tx;
+        let protobuf_output_rx = ctx.local.protobuf_output_rx;
 
         defmt::info!("USB task started");
 
@@ -459,18 +492,43 @@ mod app {
 
             // Важно! Список передаваемый сюда в том же порядке,
             // что были инициализированы интерфейсы
-            let _res = (&mut usb_dev, &mut scsi, &mut serial).lock(|usb_dev, _scsi, serial| {
+            let res = (&mut usb_dev, &mut scsi, &mut serial).lock(|usb_dev, _scsi, serial| {
                 usb_dev.poll(&mut [/*scsi,*/ serial])
             });
 
-            if _res {
-                serial.lock(|serial| {
-                    let mut buf = [0u8; 64];
-                    while let Ok(byte) = serial.read(&mut buf) {
-                        // Эхо для теста
-                        let _ = serial.write(&buf[..byte]);
-                    }
-                })
+            if res {
+                while let Ok(data) = serial.lock(|serial| {
+                    let mut buf = [0u8; config::BULK_MAX_PACKET_SIZE];
+                    serial.read_packet(&mut buf).map(|len| buf[..len].to_vec())
+                }) {
+                    protobuf_input_tx.send(data).await.ok();
+
+                    // send data from protobuf server if exists
+                    protobuf_output_rx
+                        .try_recv()
+                        .map(|data| {
+                            let mut offset = 0;
+                            while offset < data.len() {
+                                match serial.lock(|serial| serial.write_packet(&data[offset..])) {
+                                    Ok(len) if len > 0 => offset += len,
+                                    _ => break,
+                                }
+                            }
+                        })
+                        .ok();
+                }
+            }
+        }
+    }
+
+    #[task(local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
+    async fn protobuf_server(ctx: protobuf_server::Context) {
+        let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
+        let protobuf_output_tx = ctx.local.protobuf_output_tx;
+
+        loop {
+            if let Err(e) = impls::process_protobuf(&mut rx_stream, protobuf_output_tx).await {
+                defmt::error!("Protobuf error: {}", e);
             }
         }
     }

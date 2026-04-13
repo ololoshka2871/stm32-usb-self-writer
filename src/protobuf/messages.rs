@@ -8,48 +8,48 @@ pub const T_COEFFS_COUNT: usize = 5;
 pub const PASSWORD_SIZE: usize = 10;
 
 impl PCoefficients {
-    pub(crate) fn from(p_coeffs: &crate::settings::app_settings::P16Coeffs) -> Self {
+    pub(crate) fn from(p_coeffs: &crate::settings::P16Coeffs) -> Self {
         Self {
-            ft0: Some(p_coeffs.Fp0),
-            fp0: Some(p_coeffs.Ft0),
+            ft0: Some(p_coeffs.fp0),
+            fp0: Some(p_coeffs.ft0),
 
-            a0: Some(p_coeffs.A[0]),
-            a1: Some(p_coeffs.A[1]),
-            a2: Some(p_coeffs.A[2]),
-            a3: Some(p_coeffs.A[3]),
-            a4: Some(p_coeffs.A[4]),
-            a5: Some(p_coeffs.A[5]),
-            a6: Some(p_coeffs.A[6]),
-            a7: Some(p_coeffs.A[7]),
-            a8: Some(p_coeffs.A[8]),
-            a9: Some(p_coeffs.A[9]),
-            a10: Some(p_coeffs.A[10]),
-            a11: Some(p_coeffs.A[11]),
-            a12: Some(p_coeffs.A[12]),
-            a13: Some(p_coeffs.A[13]),
-            a14: Some(p_coeffs.A[14]),
-            a15: Some(p_coeffs.A[15]),
+            a0: Some(p_coeffs.a[0]),
+            a1: Some(p_coeffs.a[1]),
+            a2: Some(p_coeffs.a[2]),
+            a3: Some(p_coeffs.a[3]),
+            a4: Some(p_coeffs.a[4]),
+            a5: Some(p_coeffs.a[5]),
+            a6: Some(p_coeffs.a[6]),
+            a7: Some(p_coeffs.a[7]),
+            a8: Some(p_coeffs.a[8]),
+            a9: Some(p_coeffs.a[9]),
+            a10: Some(p_coeffs.a[10]),
+            a11: Some(p_coeffs.a[11]),
+            a12: Some(p_coeffs.a[12]),
+            a13: Some(p_coeffs.a[13]),
+            a14: Some(p_coeffs.a[14]),
+            a15: Some(p_coeffs.a[15]),
         }
     }
 }
 
 impl T5Coefficients {
-    pub(crate) fn from(t_coeffs: &crate::settings::app_settings::T5Coeffs) -> Self {
+    pub(crate) fn from(t_coeffs: &crate::settings::T5Coeffs) -> Self {
         Self {
-            t0: Some(t_coeffs.T0),
-            f0: Some(t_coeffs.F0),
+            t0: Some(t_coeffs.t0),
+            f0: Some(t_coeffs.f0),
 
-            c1: Some(t_coeffs.C[0]),
-            c2: Some(t_coeffs.C[1]),
-            c3: Some(t_coeffs.C[2]),
-            c4: Some(t_coeffs.C[3]),
-            c5: Some(t_coeffs.C[4]),
+            c1: Some(t_coeffs.c[0]),
+            c2: Some(t_coeffs.c[1]),
+            c3: Some(t_coeffs.c[2]),
+            c4: Some(t_coeffs.c[3]),
+            c5: Some(t_coeffs.c[4]),
         }
     }
 }
 
 impl WorkRange {
-    pub(crate) fn from(wr: &crate::settings::app_settings::WorkRange) -> Self {
+    pub(crate) fn from(wr: &crate::settings::WorkRange) -> Self {
         Self {
             minimum: Some(wr.minimum),
             maximum: Some(wr.maximum),
@@ -86,11 +86,11 @@ pub enum DateField {
 }
 
 impl CalibrationDate {
-    pub(crate) fn from(cd: &crate::settings::app_settings::CalibrationDate) -> Self {
+    pub(crate) fn from(cd: &crate::settings::CalibrationDate) -> Self {
         Self {
-            day: Some(cd.Day),
-            month: Some(cd.Month),
-            year: Some(cd.Year),
+            day: Some(cd.day),
+            month: Some(cd.month),
+            year: Some(cd.year),
         }
     }
 
@@ -134,11 +134,11 @@ pub enum WorkRangeError {
 }
 
 impl WriteConfig {
-    pub(crate) fn from(wc: &crate::settings::app_settings::WriteConfig) -> Self {
+    pub(crate) fn from(wc: &crate::settings::WriteConfig) -> Self {
         Self {
-            base_interval_ms: Some(wc.BaseInterval_ms),
-            p_write_devider: Some(wc.PWriteDevider),
-            t_write_devider: Some(wc.TWriteDevider),
+            base_interval_ms: Some(wc.base_interval_ms),
+            p_write_devider: Some(wc.p_write_devider),
+            t_write_devider: Some(wc.t_write_devider),
         }
     }
 }

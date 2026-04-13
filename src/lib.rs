@@ -7,6 +7,7 @@ pub mod config;
 pub mod sensors;
 pub mod settings;
 pub mod support;
+pub mod protobuf;
 
 pub use crate::support::{
     interrupt_controller::IInterruptController, nop_delay::NOPDelay, power_ctrl::PowerCtrl,

@@ -242,7 +242,7 @@ fn verify_parameters(
     }
 
     if let Some(set_pressure_meassure_units) = ws.set_pressure_meassure_units {
-        if let Some(crate::settings::app_settings::PressureMeassureUnits::INVALID_ZERO) | None =
+        if let Some(crate::settings::Monitoring::INVALID_ZERO) | None =
             num::FromPrimitive::from_i32(set_pressure_meassure_units)
         {
             return Err(SettingActionError::ActionError(format!(

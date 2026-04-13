@@ -13,6 +13,7 @@ pub fn fill_info(
     info.hw_version = crate::config::HW_VERSION;
     info.sw_version = git_version!();
 
+    /*
     match output_storage.lock(*super::OUT_STORAGE_LOCK_WAIT) {
         Ok(guard) => {
             info.pressure_channel_failed = guard.frequencys[FChannel::Pressure as usize].is_none();
@@ -25,6 +26,7 @@ pub fn fill_info(
             err = Some(e);
         }
     }
+    */
 
     let r: Result<(), crate::settings::SettingActionError<()>> =
         crate::settings::settings_action(Duration::ms(1), |(app_settings, _)| {
