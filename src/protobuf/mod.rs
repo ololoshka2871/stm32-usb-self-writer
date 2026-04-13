@@ -8,8 +8,8 @@ mod message_body;
 mod messages;
 //mod monitoring_over_conditions;
 mod new_response;
-//mod output;
-//mod process_requiest;
+mod output;
+mod process_request;
 //mod process_settings;
 mod stream;
 
@@ -17,7 +17,7 @@ pub use encode_md_message::encode_md_message;
 pub use md::{recive_md_header, recive_md_header_async};
 pub use message_body::{recive_message_body, recive_message_body_async};
 pub use new_response::new_response;
-//pub use process_requiest::process_requiest;
+pub use process_request::process_request;
 pub use stream::{AsyncStream, Stream};
 
 pub use messages::{P_COEFFS_COUNT, PASSWORD_SIZE, Response, T_COEFFS_COUNT};

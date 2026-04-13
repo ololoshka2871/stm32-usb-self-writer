@@ -8,6 +8,7 @@ pub mod sensors;
 pub mod settings;
 pub mod support;
 pub mod protobuf;
+pub mod workmodes;
 
 pub use crate::support::{
     interrupt_controller::IInterruptController, nop_delay::NOPDelay, power_ctrl::PowerCtrl,

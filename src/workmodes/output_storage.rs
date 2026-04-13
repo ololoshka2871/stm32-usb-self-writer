@@ -1,7 +1,9 @@
+#[derive(Clone, Debug)]
 pub struct OutputStorage {
     pub targets: [u32; 2],
     pub results: [Option<u32>; 2],
     pub frequencys: [Option<f64>; 2],
+    pub freq_timestamp: u64,
     pub values: [Option<f64>; 2],
 
     pub t_cpu: f32,
@@ -14,9 +16,10 @@ pub struct OutputStorage {
 impl Default for OutputStorage {
     fn default() -> Self {
         Self {
-            targets: [crate::config::INITIAL_FREQMETER_TARGET; 2],
+            targets: [crate::config::INITIAL_FREQMETER_TARGET as u32; 2],
             results: [None; 2],
             frequencys: [None; 2],
+            freq_timestamp: 0,
             values: [None; 2],
 
             t_cpu: 0.0,

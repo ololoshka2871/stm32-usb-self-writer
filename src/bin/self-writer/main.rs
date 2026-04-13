@@ -80,6 +80,8 @@ mod app {
         scsi: (),
         serial: usbd_serial::CdcAcmClass<'static, stm32_usbd::UsbBus<UsbPeriph>>,
         usb_notify: no_std_async::Condvar,
+
+        output_storage: stm32_usb_self_writer::workmodes::output_storage::OutputStorage,
     }
 
     #[local]
@@ -294,6 +296,8 @@ mod app {
                 scsi,
                 serial,
                 usb_notify: no_std_async::Condvar::new(),
+
+                output_storage: Default::default(),
             },
             Local {
                 analog_sens,
@@ -385,6 +389,7 @@ mod app {
             &rtc_sync,
             &base_period, &f1_base_period_devider,
             &start_delay,
+            output_storage
         ],
         local = [f1_capture_rx, f1_power_pin],
         priority = 2,
@@ -413,6 +418,7 @@ mod app {
             &rtc_sync,
             &base_period, &f2_base_period_devider,
             &start_delay,
+            output_storage
         ],
         local = [f2_capture_rx, f2_power_pin],
         priority = 2,
@@ -483,12 +489,18 @@ mod app {
 
         defmt::info!("USB task started");
 
+        let long_wait = config::Duration::millis(10);
+        let short_wait = config::Duration::millis(1);
+
+        let mut tx_data = Option::<Vec<u8>>::None;
+        let mut wait = long_wait;
+
         loop {
             led.lock(|led| led.set_state(config::LED_DISABLE));
-            Mono::timeout_after(10.millis(), usb_notify.wait())
-                .await
-                .ok();
+            Mono::timeout_after(wait, usb_notify.wait()).await.ok();
             led.lock(|led| led.set_state(config::LED_ENABLE));
+
+            wait = long_wait; // default response
 
             // Важно! Список передаваемый сюда в том же порядке,
             // что были инициализированы интерфейсы
@@ -502,34 +514,53 @@ mod app {
                     serial.read_packet(&mut buf).map(|len| buf[..len].to_vec())
                 }) {
                     protobuf_input_tx.send(data).await.ok();
-
-                    // send data from protobuf server if exists
-                    protobuf_output_rx
-                        .try_recv()
-                        .map(|data| {
-                            let mut offset = 0;
-                            while offset < data.len() {
-                                match serial.lock(|serial| serial.write_packet(&data[offset..])) {
-                                    Ok(len) if len > 0 => offset += len,
-                                    _ => break,
-                                }
-                            }
-                        })
-                        .ok();
                 }
+
+                wait = short_wait; // fast response
+            }
+
+            // send data from protobuf server if exists
+            if let Some(mut data) = tx_data.take() {
+                let to_send = data.len().min(config::BULK_MAX_PACKET_SIZE);
+                match serial.lock(|serial| serial.write_packet(&data[..to_send])) {
+                    Ok(size) => {
+                        if size < data.len() {
+                            data.drain(..size);
+                            tx_data.replace(data);
+
+                            wait = short_wait; // fast response
+                        }
+                    }
+                    Err(e) => {
+                        defmt::error!("Failed to send data over USB: {}", defmt::Debug2Format(&e));
+                    }
+                }
+            } else if let Ok(data) = protobuf_output_rx.try_recv() {
+                tx_data.replace(data);
+
+                wait = short_wait; // fast response
             }
         }
     }
 
-    #[task(local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
+    #[task(shared = [output_storage], local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
+        use alloc::boxed::Box;
+
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
         let protobuf_output_tx = ctx.local.protobuf_output_tx;
+        let mut output_storage = ctx.shared.output_storage;
+
+        let mut get_output = Box::new(move || output_storage.lock(|storage| storage.clone()));
 
         loop {
-            if let Err(e) =
-                impls::process_protobuf(&mut rx_stream, protobuf_output_tx, || Mono::now().ticks())
-                    .await
+            if let Err(e) = impls::process_protobuf(
+                &mut rx_stream,
+                protobuf_output_tx,
+                || Mono::now().ticks(),
+                &mut get_output,
+            )
+            .await
             {
                 defmt::error!("Protobuf error: {}", e);
             }
