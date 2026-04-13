@@ -7,6 +7,8 @@ mod types;
 
 extern crate alloc;
 
+use alloc::vec::Vec;
+
 use defmt_rtt as _; // global logger
 use panic_abort as _;
 
@@ -51,8 +53,6 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
 mod app {
-    use alloc::vec::Vec;
-
     use super::*;
 
     #[shared]
@@ -140,7 +140,7 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.hclk().0);
         defmt::info!("\tSysTick");
 
-        let (settings, flash_policy, base_period, start_delay, write_config) =
+        let (settings, flash_policy, base_period, mut start_delay, write_config) =
             init_settings(flash, dp.CRC, &mut rcc, high_perf_mode);
 
         let rtc = init_rtc_service(
@@ -256,13 +256,17 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
-        sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
-
         if high_perf_mode {
+            start_delay = config::Duration::secs(2);
+
+            sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
+            sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+
             usb_task::spawn().expect("Failed to spawn usb_task task");
             protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
-            read_analog::spawn().expect("Failed to spawn regular test task");
+            read_analog::spawn().expect("Failed to spawn read_analog task");
+        } else {
+            self_writer_signal::spawn().expect("Failed to spawn self_writer_signal task");
         }
 
         defmt::info!("Tasks spawned");
@@ -595,5 +599,25 @@ mod app {
 
             Mono::delay(base_period).await;
         }
+    }
+
+    #[task(shared = [led, &start_delay], priority = 1)]
+    async fn self_writer_signal(ctx: self_writer_signal::Context) {
+        let mut led = ctx.shared.led;
+        let start_delay = *ctx.shared.start_delay;
+
+        defmt::info!("+ Startup Signal +");
+        Mono::delay(config::Duration::secs(2)).await;
+        for _ in 0..config::START_BLINK_COUNT {
+            led.lock(|led| led.set_state(config::LED_ENABLE));
+            Mono::delay(config::Duration::millis(config::START_BLINK_PERIOD_MS / 2)).await;
+            led.lock(|led| led.set_state(config::LED_DISABLE));
+            Mono::delay(config::Duration::millis(config::START_BLINK_PERIOD_MS / 2)).await;
+        }
+
+        sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
+        sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+
+        defmt::info!("Startup signal done, measuring will start after {} seconds", start_delay.to_secs());
     }
 }
