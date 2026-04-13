@@ -6,7 +6,7 @@ use serde::Serialize;
 pub struct P16Coeffs {
     pub fp0: f32,
     pub ft0: f32,
-    pub a: [f32; /*crate::protobuf::P_COEFFS_COUNT*/ 16],
+    pub a: [f32; crate::protobuf::P_COEFFS_COUNT],
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
@@ -14,7 +14,7 @@ pub struct P16Coeffs {
 pub struct T5Coeffs {
     pub f0: f32,
     pub t0: f32,
-    pub c: [f32; /*crate::protobuf::T_COEFFS_COUNT*/ 5],
+    pub c: [f32; crate::protobuf::T_COEFFS_COUNT],
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
@@ -104,7 +104,7 @@ pub struct AppSettings {
     pub pressure_meassure_units: PressureMeassureUnits,
 
     #[serde(skip_serializing)]
-    pub password: [u8; /*crate::protobuf::PASSWORD_SIZE*/ 10],
+    pub password: [u8; crate::protobuf::PASSWORD_SIZE],
 
     pub monitoring: Monitoring,
 }

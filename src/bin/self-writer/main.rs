@@ -527,7 +527,10 @@ mod app {
         let protobuf_output_tx = ctx.local.protobuf_output_tx;
 
         loop {
-            if let Err(e) = impls::process_protobuf(&mut rx_stream, protobuf_output_tx).await {
+            if let Err(e) =
+                impls::process_protobuf(&mut rx_stream, protobuf_output_tx, || Mono::now().ticks())
+                    .await
+            {
                 defmt::error!("Protobuf error: {}", e);
             }
         }

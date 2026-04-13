@@ -45,11 +45,16 @@ pub enum ProtobufProcessError<IE: Debug, OE: Debug> {
     Input(IE),
     Output(OE),
     Decode(prost::DecodeError),
+    Encode(prost::EncodeError),
 }
 
 impl<IE: Debug, OE: Debug> ProtobufProcessError<IE, OE> {
     pub fn from_output_error(e: OE) -> Self {
         ProtobufProcessError::Output(e)
+    }
+
+    pub fn from_encode_error(e: prost::EncodeError) -> Self {
+        ProtobufProcessError::Encode(e)
     }
 }
 
@@ -74,6 +79,9 @@ impl<IE: Debug, OE: Debug> defmt::Format for ProtobufProcessError<IE, OE> {
             }
             ProtobufProcessError::Decode(e) => {
                 defmt::write!(fmt, "Decode error: {:?}", defmt::Debug2Format(e))
+            }
+            ProtobufProcessError::Encode(e) => {
+                defmt::write!(fmt, "Encode error: {:?}", defmt::Debug2Format(e))
             }
         }
     }
