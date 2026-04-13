@@ -77,7 +77,9 @@ macro_rules! build_freqmeter_dma {
 macro_rules! freqmeter {
     (
         channel=$channel:expr,
+        output_storage=$output_storage:expr,
         start_delay=$start_delay:expr,
+        rtc=$rtc:expr,
         rtc_sync=$rtc_sync:expr,
         base_period=$base_period:expr,
         base_period_devider=$base_period_devider:expr,
@@ -89,7 +91,7 @@ macro_rules! freqmeter {
         mono=$mono:ty,
     ) => {
         use stm32_usb_self_writer::sensors::freqmeter::{
-            calc_new_target, calc_result, FreqmeterDmaChannelExt, FreqmeterStates,
+            FreqmeterDmaChannelExt, FreqmeterStates, calc_new_target, calc_result,
         };
 
         let start_delay = $start_delay;
@@ -101,6 +103,7 @@ macro_rules! freqmeter {
         let mut f_capturer = $f_capturer;
         let mut capture_rx = $capture_rx;
 
+        let mut rtc = $rtc;
         let rtc_sync = $rtc_sync;
 
         let mut current_state = FreqmeterStates::<$mono>::init(start_delay);
@@ -154,6 +157,17 @@ macro_rules! freqmeter {
                                 "{}: Adaptation: Capture timeout, channel down, reset...",
                                 $channel
                             );
+
+                            $output_storage.lock(|output_storage| {
+                                output_storage.set_freqmeter_result(
+                                    $channel as usize,
+                                    config::INITIAL_FREQMETER_TARGET as u32,
+                                    None,
+                                    None,
+                                    rtc.lock(|rtc| rtc.current_time()),
+                                )
+                            });
+
                             // Stop channel
                             (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                 capturer.stop();
@@ -216,7 +230,15 @@ macro_rules! freqmeter {
                         None,
                     );
 
-                    // TODO: report failed adaptation, F = None
+                    $output_storage.lock(|output_storage| {
+                        output_storage.set_freqmeter_result(
+                            $channel as usize,
+                            config::INITIAL_FREQMETER_TARGET as u32,
+                            None,
+                            None,
+                            rtc.lock(|rtc| rtc.current_time()),
+                        )
+                    });
                 }
                 FreqmeterStates::Measure {
                     prev_freq,
@@ -242,7 +264,17 @@ macro_rules! freqmeter {
                             $base_period_devider,
                             None,
                         );
-                        // TODO: report F = Some(prev_freq)
+
+                        $output_storage.lock(|output_storage| {
+                            output_storage.set_freqmeter_result(
+                                $channel as usize,
+                                target as u32,
+                                None,
+                                Some(prev_freq as f64),
+                                rtc.lock(|rtc| rtc.current_time()),
+                            )
+                        });
+
                         continue;
                     }
 
@@ -275,7 +307,17 @@ macro_rules! freqmeter {
                                 transfer.stop();
                                 while let Ok(_) = capture_rx.try_recv() {}
                             });
-                            // TODO: report F = Some(prev_freq)
+
+                            $output_storage.lock(|output_storage| {
+                                output_storage.set_freqmeter_result(
+                                    $channel as usize,
+                                    target as u32,
+                                    None,
+                                    Some(prev_freq as f64),
+                                    rtc.lock(|rtc| rtc.current_time()),
+                                )
+                            });
+
                             current_state = FreqmeterStates::<$mono>::plan_next_state(
                                 <$mono>::now(),
                                 $base_period,
@@ -291,19 +333,29 @@ macro_rules! freqmeter {
                         Ok(Ok(capture)) => {
                             defmt::trace!("{}: Measure: Got second capture: {}", $channel, capture);
                             if let Ok((f, result)) = calc_result(start_capture, capture, f_ref) {
-                                defmt::debug!("{}: Measurment done: Freq: {} Hz", $channel, f);
+                                defmt::trace!("{}: Measurment done: Freq: {} Hz", $channel, f);
                                 (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                     transfer.stop();
                                     capturer.stop();
                                     while let Ok(_) = capture_rx.try_recv() {}
                                 });
+
+                                $output_storage.lock(|output_storage| {
+                                    output_storage.set_freqmeter_result(
+                                        $channel as usize,
+                                        target as u32,
+                                        Some(result),
+                                        Some(f as f64),
+                                        rtc.lock(|rtc| rtc.current_time()),
+                                    )
+                                });
+
                                 current_state = FreqmeterStates::<$mono>::plan_next_state(
                                     deadline,
                                     $base_period,
                                     $base_period_devider,
                                     Some(f),
                                 );
-                                // TODO: report F = Some(f)
 
                                 rtc_sync.delay_until_sync(deadline).await;
                                 continue;

@@ -18,7 +18,7 @@ use stm32l4xx_hal::{
 };
 
 use rtic::app;
-use rtic_monotonics::{Monotonic, fugit::ExtU32};
+use rtic_monotonics::Monotonic;
 use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
@@ -256,15 +256,14 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        //sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
-        //sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+        sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
+        sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
 
         if high_perf_mode {
             usb_task::spawn().expect("Failed to spawn usb_task task");
             protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
+            read_analog::spawn().expect("Failed to spawn regular test task");
         }
-
-        //regular_test::spawn().expect("Failed to spawn regular test task");
 
         defmt::info!("Tasks spawned");
 
@@ -389,15 +388,18 @@ mod app {
             &rtc_sync,
             &base_period, &f1_base_period_devider,
             &start_delay,
+            rtc,
             output_storage
         ],
         local = [f1_capture_rx, f1_power_pin],
         priority = 2,
     )]
-    async fn sync_freqmeter1(ctx: sync_freqmeter1::Context) {
+    async fn sync_freqmeter1(mut ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel = InputChannel::Ch1,
+            output_storage = ctx.shared.output_storage,
             start_delay = *ctx.shared.start_delay,
+            rtc = ctx.shared.rtc,
             rtc_sync = ctx.shared.rtc_sync,
             base_period = *ctx.shared.base_period,
             base_period_devider = *ctx.shared.f1_base_period_devider,
@@ -418,15 +420,18 @@ mod app {
             &rtc_sync,
             &base_period, &f2_base_period_devider,
             &start_delay,
+            rtc,
             output_storage
         ],
         local = [f2_capture_rx, f2_power_pin],
         priority = 2,
     )]
-    async fn sync_freqmeter2(ctx: sync_freqmeter2::Context) {
+    async fn sync_freqmeter2(mut ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
             channel = InputChannel::Ch2,
+            output_storage = ctx.shared.output_storage,
             start_delay = *ctx.shared.start_delay,
+            rtc = ctx.shared.rtc,
             rtc_sync = ctx.shared.rtc_sync,
             base_period = *ctx.shared.base_period,
             base_period_devider = *ctx.shared.f2_base_period_devider,
@@ -567,16 +572,28 @@ mod app {
         }
     }
 
-    #[task(local = [analog_sens], priority = 1)]
-    async fn regular_test(ctx: regular_test::Context) {
+    #[task(shared = [output_storage, &base_period], local = [analog_sens], priority = 1)]
+    async fn read_analog(ctx: read_analog::Context) {
         let analog_sens = ctx.local.analog_sens;
+        let base_period = *ctx.shared.base_period;
+
+        let mut output_storage = ctx.shared.output_storage;
 
         defmt::info!("Regular test task");
         loop {
-            let (vbat, tcpu) = analog_sens.read();
-            defmt::info!("VBAT: {} V, TCPU: {} °C", vbat, tcpu);
+            let (vbat, tcpu, v_bat_raw, v_tewmp_raw) = analog_sens.read();
+            defmt::trace!(
+                "Analog read: vbat = {} V, tcpu = {} °C, v_bat_raw = {}, t_cpu_raw = {}",
+                vbat,
+                tcpu,
+                v_bat_raw,
+                v_tewmp_raw
+            );
 
-            Mono::delay(1000u32.millis()).await;
+            output_storage
+                .lock(move |storage| storage.set_analog_values(vbat, tcpu, v_bat_raw, v_tewmp_raw));
+
+            Mono::delay(base_period).await;
         }
     }
 }

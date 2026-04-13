@@ -20,7 +20,7 @@ pub fn fill_output(
         output.ft = Some(
             output_storage.frequencys[FChannel::Temperature as usize].unwrap_or_default() as f32,
         );
-        output.ftimestamp = Some(output_storage.freq_timestamp);
+        output.ftimestamp = Some(output_storage.freq_timestamp());
     }
 
     if req.get_raw.is_some() {

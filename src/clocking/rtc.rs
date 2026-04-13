@@ -11,7 +11,7 @@ const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
 const LSE_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
 const LSI_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct CurrentTime {
     pub year: u32,
     pub month: u32,
@@ -36,6 +36,24 @@ impl defmt::Format for CurrentTime {
             self.seconds,
             self.milliseconds
         );
+    }
+}
+
+impl Into<u64> for CurrentTime {
+    fn into(self) -> u64 {
+        let year = self.year as u64;
+        let month = self.month as u64;
+        let day = self.day_of_month as u64;
+        let hours = self.hours as u64;
+        let minutes = self.minutes as u64;
+        let seconds = self.seconds as u64;
+        let milliseconds = self.milliseconds as u64;
+
+        // Simple conversion to milliseconds since a fixed point in time (e.g., 1970-01-01)
+        (((year * 12 + month) * 31 + day) * 24 + hours) * 60 * 60 * 1000
+            + minutes * 60 * 1000
+            + seconds * 1000
+            + milliseconds
     }
 }
 

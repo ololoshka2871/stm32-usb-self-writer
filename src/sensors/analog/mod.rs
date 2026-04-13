@@ -25,16 +25,16 @@ impl<BP: Send + Channel> AnalogSensor<BP> {
         }
     }
 
-    pub fn read(&mut self) -> (f32, f32) {
+    pub fn read(&mut self) -> (f32, f32, u16, u16) {
         self.adc.calibrate(&mut self.v_ref);
 
-        let v = self.adc.read(&mut self.vbat_pin).unwrap_or(0);
-        let vbat_input_v = self.adc.to_millivolts(v) as f32 / 1000.0;
+        let v_bat_raw = self.adc.read(&mut self.vbat_pin).unwrap_or(0);
+        let vbat_input_v = self.adc.to_millivolts(v_bat_raw) as f32 / 1000.0;
         let vbat = vbat_input_v * (crate::config::VBAT_DEVIDER_R1 + crate::config::VBAT_DEVIDER_R2)
             / crate::config::VBAT_DEVIDER_R2;
-        let v = self.adc.read(&mut self.tcpu_ch).unwrap_or(0);
-        let tcpu = self.adc.to_degrees_centigrade(v);
+        let v_tewmp_raw = self.adc.read(&mut self.tcpu_ch).unwrap_or(0);
+        let tcpu = self.adc.to_degrees_centigrade(v_tewmp_raw);
 
-        (vbat, tcpu)
+        (vbat, tcpu, v_bat_raw, v_tewmp_raw)
     }
 }
