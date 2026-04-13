@@ -12,6 +12,8 @@ use stm32l4xx_hal::{
 };
 
 use stm32_usb_self_writer::{clocking::ClockConfigProvider, support::crc::STM32L4Crc32};
+use usb_device::bus::UsbBusAllocator;
+use usbd_serial::SerialPort;
 
 use crate::types;
 
@@ -138,4 +140,59 @@ pub fn init_master_timer(
     defmt::info!("\tMaster timer");
 
     master_timer
+}
+
+pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
+    is_enabled: bool,
+    periph: USB,
+    bus: &'a mut Option<UsbBusAllocator<stm32_usbd::UsbBus<USB>>>,
+    vid_pid: usb_device::device::UsbVidPid,
+) -> (
+    usb_device::device::UsbDevice<'a, stm32_usbd::UsbBus<USB>>,
+    (),
+    SerialPort<'a, stm32_usbd::UsbBus<USB>>,
+) {
+    if !is_enabled {
+        defmt::info!("\tUSB not enabled, skipping USB initialization");
+        return unsafe {
+            (
+                core::mem::MaybeUninit::zeroed().assume_init(),
+                core::mem::MaybeUninit::zeroed().assume_init(),
+                core::mem::MaybeUninit::zeroed().assume_init(),
+            )
+        };
+    }
+
+    defmt::info!("Creating usb low-level driver: PA11, PA12, AF10");
+
+    let bus: &'a mut UsbBusAllocator<stm32_usbd::UsbBus<USB>> =
+        bus.get_or_insert(stm32_usbd::UsbBus::new(periph));
+
+    // TODO:
+    //defmt::info!("Allocating SCSI device");
+    //let mut scsi = Scsi::new(
+    //    bus,
+    //    64, // для устройств full speed: max_packet_size 8, 16, 32 or 64
+    //    EMfatStorage::new(c_str!("LOGGER")),
+    //    "SCTB", // <= max 8 больших букв
+    //    "SelfWriter",
+    //    "L433",
+    //);
+    let scsi = ();
+
+    defmt::info!("Allocating ACM device");
+    let serial = usbd_serial::SerialPort::new(bus);
+
+    defmt::info!("Building usb device: vid={} pid={}", &vid_pid.0, &vid_pid.1);
+    let usb_dev: usb_device::prelude::UsbDevice<'a, stm32_usbd::UsbBus<USB>> =
+        usb_device::device::UsbDeviceBuilder::new(bus, vid_pid)
+            .manufacturer("SCTB ELPA")
+            .product("Pressure self-registrator")
+            .serial_number(stm32_device_signature::device_id_hex())
+            .composite_with_iads()
+            .build();
+
+    defmt::info!("USB ready!");
+
+    (usb_dev, scsi, serial)
 }

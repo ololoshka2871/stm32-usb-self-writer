@@ -26,7 +26,7 @@ use stm32_usb_self_writer::{
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,
-    support::crc::STM32L4Crc32,
+    support::{crc::STM32L4Crc32, usb_periph::UsbPeriph},
 };
 
 use init::*;
@@ -54,6 +54,7 @@ mod app {
 
     #[shared]
     struct Shared {
+        led: types::Led,
         rtc: RtcService,
         base_period: config::Duration,
         start_delay: config::Duration,
@@ -71,12 +72,15 @@ mod app {
 
         settings: settings::SettingsManagerType,
         flash_policy: settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32>,
+
+        usb_dev: usb_device::device::UsbDevice<'static, stm32_usbd::UsbBus<UsbPeriph>>,
+        scsi: (),
+        serial: usbd_serial::SerialPort<'static, stm32_usbd::UsbBus<UsbPeriph>>,
+        usb_notify: no_std_async::Condvar,
     }
 
     #[local]
     struct Local {
-        led: types::Led,
-
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
 
         master_timer: types::MasterCounter,
@@ -206,19 +210,29 @@ mod app {
         );
         defmt::info!("\tFreqmeter 2");
 
-        //{
-        //    let usbperith = UsbPeriph {
-        //        usb: dp.USB,
-        //        pin_dm: gpioa
-        //            .pa11
-        //            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
-        //            .set_speed(Speed::VeryHigh),
-        //        pin_dp: gpioa
-        //            .pa12
-        //            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
-        //            .set_speed(Speed::VeryHigh),
-        //    };
-        //}
+        let (usb_dev, scsi, serial) = init_usb(
+            fast_mode,
+            UsbPeriph {
+                usb: dp.USB,
+                pin_dm: gpioa
+                    .pa11
+                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
+                    .set_speed(stm32l4xx_hal::gpio::Speed::VeryHigh),
+                pin_dp: gpioa
+                    .pa12
+                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh)
+                    .set_speed(stm32l4xx_hal::gpio::Speed::VeryHigh),
+            },
+            unsafe {
+                cortex_m::singleton!(
+                    : Option<usb_device::bus::UsbBusAllocator<
+                        stm32_usbd::UsbBus<stm32_usb_self_writer::support::usb_periph::UsbPeriph>>
+                    > = None
+                )
+                .unwrap_unchecked()
+            },
+            usb_device::device::UsbVidPid(0x0483, 0x5720),
+        );
 
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
@@ -232,6 +246,10 @@ mod app {
         sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
         sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
 
+        if high_perf_mode {
+            usb_task::spawn().expect("Failed to spawn usb_task task");
+        }
+
         //regular_test::spawn().expect("Failed to spawn regular test task");
 
         defmt::info!("Tasks spawned");
@@ -240,6 +258,8 @@ mod app {
 
         (
             Shared {
+                led,
+
                 rtc,
                 base_period,
                 start_delay,
@@ -257,9 +277,13 @@ mod app {
 
                 settings,
                 flash_policy,
+
+                usb_dev,
+                scsi,
+                serial,
+                usb_notify: no_std_async::Condvar::new(),
             },
             Local {
-                led,
                 analog_sens,
                 master_timer,
 
@@ -327,6 +351,11 @@ mod app {
         // Если поток, ожидающий rtc_event не сделает любой .await до следующего
         // rtc_event.wait().await, то он сожрет все нотификации в 1 лицо
         rtc_sync.notify_all();
+    }
+
+    #[task(binds = USB_FS, shared = [&usb_notify], priority = 1)]
+    fn usb_fs(ctx: usb_fs::Context) {
+        ctx.shared.usb_notify.notify_one();
     }
 
     //-------------------------------------------------------------------------
@@ -408,6 +437,42 @@ mod app {
 
         // reset device
         cortex_m::peripheral::SCB::sys_reset();
+    }
+
+    #[task(shared = [&usb_notify, usb_dev, scsi, serial, led], priority = 1)]
+    async fn usb_task(ctx: usb_task::Context) {
+        let usb_notify = ctx.shared.usb_notify;
+
+        let mut usb_dev = ctx.shared.usb_dev;
+        let mut scsi = ctx.shared.scsi;
+        let mut serial = ctx.shared.serial;
+        let mut led = ctx.shared.led;
+
+        defmt::info!("USB task started");
+
+        loop {
+            led.lock(|led| led.set_state(config::LED_DISABLE));
+            Mono::timeout_after(10.millis(), usb_notify.wait())
+                .await
+                .ok();
+            led.lock(|led| led.set_state(config::LED_ENABLE));
+
+            // Важно! Список передаваемый сюда в том же порядке,
+            // что были инициализированы интерфейсы
+            let _res = (&mut usb_dev, &mut scsi, &mut serial).lock(|usb_dev, _scsi, serial| {
+                usb_dev.poll(&mut [/*scsi,*/ serial])
+            });
+
+            if _res {
+                serial.lock(|serial| {
+                    let mut buf = [0u8; 64];
+                    while let Ok(byte) = serial.read(&mut buf) {
+                        // Эхо для теста
+                        let _ = serial.write(&buf[..byte]);
+                    }
+                })
+            }
+        }
     }
 
     #[task(local = [analog_sens], priority = 1)]

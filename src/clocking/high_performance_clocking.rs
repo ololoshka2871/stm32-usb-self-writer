@@ -16,6 +16,16 @@ pub fn to_pll_devider(v: u32) -> PllDivider {
     }
 }
 
+pub fn to_sai_divider(v: u8) -> u8 {
+    match v {
+        2 => 0b00,
+        4 => 0b01,
+        8 => 0b10,
+        16 => 0b11,
+        _ => panic!(),
+    }
+}
+
 pub trait PllConfigProvider {
     const PD: u32;
     const M: u32;
@@ -93,7 +103,7 @@ impl<
                 w.pllsai1n()
                     .bits(sai_mul)
                     .pllsai1q()
-                    .bits(sai_div)
+                    .bits(to_sai_divider(sai_div))
                     .pllsai1qen()
                     .set_bit() // enable PLLSAI1Q
             });

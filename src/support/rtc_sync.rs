@@ -51,12 +51,16 @@ impl<M: Monotonic<Duration = config::Duration>> RtcSync<M> {
         let now = M::now();
         if deadline > now {
             let until_deadline = deadline - now;
+            let zapas = M::Duration::millis(config::MAKE_MEASURE_TIME_ZAPAS_MS);
+
             return if until_deadline > self.rtc_period {
                 let a = until_deadline.ticks() / self.rtc_period.ticks();
                 self.rtc_period * a as u32
+            } else if until_deadline > zapas {
+                until_deadline - zapas
             } else {
                 until_deadline
-            } - M::Duration::millis(config::MAKE_MEASURE_TIME_ZAPAS_MS);
+            };
         }
         M::Duration::from_ticks(0)
     }
