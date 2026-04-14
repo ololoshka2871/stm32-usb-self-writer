@@ -4,7 +4,13 @@ use alloc::{boxed::Box, vec::Vec};
 
 use rtic_sync::channel::{NoReceiver, ReceiveError, Receiver, Sender};
 
-use stm32_usb_self_writer::protobuf::{self, AsyncStream};
+use stm32_usb_self_writer::{
+    protobuf::{self, AsyncStream},
+    settings,
+    workmodes::output_storage::OutputStorage,
+};
+
+use crate::types;
 
 pub struct AsyncProtobufStream<'a, const N: usize> {
     receiver: &'a mut Receiver<'static, Vec<u8>, N>,
@@ -62,7 +68,8 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     input_stream: &mut IS,
     output: &mut Sender<'static, Vec<u8>, N>,
     timestamp_getter: impl Fn() -> u32,
-    output_getter: &mut impl FnMut() -> stm32_usb_self_writer::workmodes::output_storage::OutputStorage,
+    output_getter: &mut impl FnMut() -> OutputStorage,
+    config_getter: &mut impl FnMut() -> (settings::AppSettings, settings::NonStoreSettings),
 ) -> Result<(), protobuf::ProtobufProcessError<IE, NoReceiver<Vec<u8>>>> {
     let request = {
         let msg_size = protobuf::recive_md_header_async(input_stream).await?;
@@ -72,7 +79,7 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     };
 
     let mut response = protobuf::new_response(request.id, timestamp_getter());
-    protobuf::process_request(&request, &mut response, output_getter);
+    protobuf::process_request(&request, &mut response, output_getter, config_getter);
 
     {
         defmt::trace!("Protobuf response: {}", defmt::Debug2Format(&response));

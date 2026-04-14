@@ -1,6 +1,5 @@
 mod app_settings;
 mod flash_rw_polcy;
-mod store_async;
 
 pub use app_settings::*;
 use flash_settings_rs::SettingsManager;

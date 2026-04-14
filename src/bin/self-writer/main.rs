@@ -51,7 +51,7 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 //-----------------------------------------------------------------------------
 
-#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD])]
+#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP])]
 mod app {
     use super::*;
 
@@ -261,6 +261,7 @@ mod app {
 
             sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
             sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
+            calc_results::spawn().expect("Failed to spawn calc_results task");
 
             usb_task::spawn().expect("Failed to spawn usb_task task");
             protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
@@ -363,8 +364,13 @@ mod app {
         );
     }
 
+    #[task(binds = USB_FS, shared = [&usb_notify], priority = 1)]
+    fn usb_fs(ctx: usb_fs::Context) {
+        ctx.shared.usb_notify.notify_one();
+    }
+
     // Приоритет строго равен sync_freqmeter*, иначе Deadlock на мьютексе rtc_sync
-    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 2)]
+    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 3)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
         let rtc_sync = ctx.shared.rtc_sync;
@@ -375,11 +381,6 @@ mod app {
         // Если поток, ожидающий rtc_event не сделает любой .await до следующего
         // rtc_event.wait().await, то он сожрет все нотификации в 1 лицо
         rtc_sync.notify_all();
-    }
-
-    #[task(binds = USB_FS, shared = [&usb_notify], priority = 1)]
-    fn usb_fs(ctx: usb_fs::Context) {
-        ctx.shared.usb_notify.notify_one();
     }
 
     //-------------------------------------------------------------------------
@@ -396,7 +397,7 @@ mod app {
             output_storage
         ],
         local = [f1_capture_rx, f1_power_pin],
-        priority = 2,
+        priority = 3,
     )]
     async fn sync_freqmeter1(mut ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
@@ -428,7 +429,7 @@ mod app {
             output_storage
         ],
         local = [f2_capture_rx, f2_power_pin],
-        priority = 2,
+        priority = 3,
     )]
     async fn sync_freqmeter2(mut ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
@@ -446,6 +447,63 @@ mod app {
             f_ref = *ctx.shared.master_counter_freq,
             mono = Mono,
         );
+    }
+
+    #[task(shared = [&rtc_sync, &base_period, output_storage, settings], priority = 2)]
+    async fn calc_results(ctx: calc_results::Context) {
+        use stm32_usb_self_writer::workmodes::FChannel;
+
+        let rtc_sync = ctx.shared.rtc_sync;
+        let period = *ctx.shared.base_period - config::Duration::millis(1);
+
+        let mut output_storage = ctx.shared.output_storage;
+        let mut settings = ctx.shared.settings;
+
+        loop {
+            rtc_sync.delay_sync(period).await;
+
+            let s = settings.lock(|settings| settings.ref_mut().0.clone());
+
+            let mut output = output_storage.lock(|output_storage| output_storage.clone());
+
+            //let monitoring = {
+            //    settings::Monitoring {
+            //        ..Default::default()
+            //    }
+            //};
+
+            {
+                let t = s
+                    .t_coefficients
+                    .calc(output.frequencys[FChannel::Temperature as usize])
+                    + s.t_zero_correction as f64;
+
+                output.values[FChannel::Temperature as usize] = t;
+
+                let p = s.p_coefficients.calc(
+                    output.frequencys[FChannel::Pressure as usize],
+                    output.frequencys[FChannel::Temperature as usize],
+                );
+                let p = s.pressure_meassure_units.wrap(p) + s.p_zero_correction as f64;
+
+                output.values[FChannel::Pressure as usize] = p;
+            }
+
+            output_storage.lock(move |output_storage| {
+                *output_storage = output;
+            });
+
+            //if mon != monitoring {
+            //    // обновились флаги выхода за пределы рабочего диапазона
+            //    settings.lock(|settings| {
+            //        let s = settings.ref_mut();
+            //        s.0.monitoring = monitoring;
+            //    });
+            //    if let Err(_) = settings_saver::spawn() {
+            //        defmt::error!("Failed to spawn settings_saver task");
+            //    }
+            //}
+        }
     }
 
     #[task(
@@ -468,7 +526,7 @@ mod app {
         }
 
         // reset device
-        cortex_m::peripheral::SCB::sys_reset();
+        //cortex_m::peripheral::SCB::sys_reset();
     }
 
     #[task(
@@ -552,15 +610,22 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage], local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
+    #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
         use alloc::boxed::Box;
 
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
-        let protobuf_output_tx = ctx.local.protobuf_output_tx;
         let mut output_storage = ctx.shared.output_storage;
+        let mut settings = ctx.shared.settings;
+        let protobuf_output_tx = ctx.local.protobuf_output_tx;
 
         let mut get_output = Box::new(move || output_storage.lock(|storage| storage.clone()));
+        let mut config_getter = Box::new(move || {
+            settings.lock(|settings| {
+                let s = settings.ref_mut();
+                (s.0.clone(), s.1.clone())
+            })
+        });
 
         loop {
             if let Err(e) = impls::process_protobuf(
@@ -568,6 +633,7 @@ mod app {
                 protobuf_output_tx,
                 || Mono::now().ticks(),
                 &mut get_output,
+                &mut config_getter,
             )
             .await
             {
@@ -618,6 +684,9 @@ mod app {
         sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
         sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
 
-        defmt::info!("Startup signal done, measuring will start after {} seconds", start_delay.to_secs());
+        defmt::info!(
+            "Startup signal done, measuring will start after {} seconds",
+            start_delay.to_secs()
+        );
     }
 }

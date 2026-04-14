@@ -8,7 +8,7 @@ pub struct OutputStorage {
     pub results: [Option<u32>; CHANNEL_COUNT],
     pub frequencys: [Option<f64>; CHANNEL_COUNT],
     pub freq_timestamps: [CurrentTime; CHANNEL_COUNT],
-    pub values: [Option<f64>; CHANNEL_COUNT],
+    pub values: [f64; CHANNEL_COUNT],
 
     pub t_cpu: f32,
     pub t_cpu_adc: u16,
@@ -24,7 +24,7 @@ impl Default for OutputStorage {
             results: [None; CHANNEL_COUNT],
             frequencys: [None; CHANNEL_COUNT],
             freq_timestamps: [CurrentTime::default(); CHANNEL_COUNT],
-            values: [None; CHANNEL_COUNT],
+            values: [f64::NAN; CHANNEL_COUNT],
 
             t_cpu: 0.0,
             t_cpu_adc: 0,

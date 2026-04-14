@@ -6,10 +6,8 @@ pub fn fill_output(
     output_storage: &OutputStorage,
 ) {
     if req.get_main_values.is_some() {
-        output.pressure =
-            Some(output_storage.values[FChannel::Pressure as usize].unwrap_or(f64::NAN) as f32);
-        output.temperature =
-            Some(output_storage.values[FChannel::Temperature as usize].unwrap_or(f64::NAN) as f32);
+        output.pressure = Some(output_storage.values[FChannel::Pressure as usize] as f32);
+        output.temperature = Some(output_storage.values[FChannel::Temperature as usize] as f32);
         output.tcpu = Some(output_storage.t_cpu);
         output.vbat = Some(output_storage.vbat as f32);
     }

@@ -1,6 +1,4 @@
-//use crate::{settings::start_writing_settings};
-
-use crate::workmodes::output_storage::OutputStorage;
+use crate::{settings, workmodes::output_storage::OutputStorage};
 
 const PROTOCOL_VERSION: u32 = super::messages::Info::ProtocolVersion as u32;
 
@@ -8,7 +6,7 @@ pub fn process_request(
     req: &super::messages::Request,
     resp: &mut super::messages::Response,
     output_getter: &mut impl FnMut() -> OutputStorage,
-    //cq: &freertos_rust::Queue<crate::threads::sensor_processor::Command>,
+    config_getter: &mut impl FnMut() -> (settings::AppSettings, settings::NonStoreSettings),
 ) {
     if !(req.device_id == super::messages::Info::PressureSelfWriterId as u32
         || req.device_id == super::messages::Info::IdDiscover as u32)

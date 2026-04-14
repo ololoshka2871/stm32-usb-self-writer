@@ -9,12 +9,70 @@ pub struct P16Coeffs {
     pub a: [f32; crate::protobuf::P_COEFFS_COUNT],
 }
 
+impl P16Coeffs {
+    pub fn calc(&self, f: Option<f64>, t: Option<f64>) -> f64 {
+        match (f, t) {
+            (Some(f), t) => {
+                let presf_minus_fp0 = f - self.fp0 as f64;
+                let ft_minus_ft0 = if let Some(t) = t {
+                    t - self.ft0 as f64
+                } else {
+                    0.0
+                };
+
+                let a = &self.a;
+
+                let k0 = a[0] as f64
+                    + ft_minus_ft0
+                        * (a[1] as f64
+                            + ft_minus_ft0 * (a[2] as f64 + ft_minus_ft0 * a[12] as f64));
+                let k1 = a[3] as f64
+                    + ft_minus_ft0
+                        * (a[5] as f64
+                            + ft_minus_ft0 * (a[7] as f64 + ft_minus_ft0 * a[13] as f64));
+                let k2 = a[4] as f64
+                    + ft_minus_ft0
+                        * (a[6] as f64
+                            + ft_minus_ft0 * (a[8] as f64 + ft_minus_ft0 * a[14] as f64));
+                let k3 = a[9] as f64
+                    + ft_minus_ft0
+                        * (a[10] as f64
+                            + ft_minus_ft0 * (a[11] as f64 + ft_minus_ft0 * a[15] as f64));
+
+                let p = k0 + presf_minus_fp0 * (k1 + presf_minus_fp0 * (k2 + presf_minus_fp0 * k3));
+
+                p
+            }
+            _ => f64::NAN,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct T5Coeffs {
     pub f0: f32,
     pub t0: f32,
     pub c: [f32; crate::protobuf::T_COEFFS_COUNT],
+}
+
+impl T5Coeffs {
+    pub fn calc(&self, f: Option<f64>) -> f64 {
+        if let Some(f) = f {
+            let temp_f_minus_fp0 = f - self.f0 as f64;
+            let mut result = self.t0 as f64;
+            let mut mu = temp_f_minus_fp0;
+
+            for i in 0..crate::protobuf::T_COEFFS_COUNT {
+                result += mu * self.c[i] as f64;
+                mu *= temp_f_minus_fp0;
+            }
+
+            result
+        } else {
+            f64::NAN
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
@@ -42,7 +100,7 @@ pub struct WriteConfig {
 }
 
 #[repr(packed(1))]
-#[derive(Debug, Copy, Clone, Serialize, Default)]
+#[derive(Debug, Copy, Clone, Serialize, Default, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 pub struct Monitoring {
     pub ovarpress: bool,
@@ -75,6 +133,23 @@ pub enum PressureMeassureUnits {
 
     // Фунт на квадратный дюйм
     PSI = 0x00AB0000,
+}
+
+impl PressureMeassureUnits {
+    pub fn wrap(&self, value: f64) -> f64 {
+        let multiplier = match self {
+            PressureMeassureUnits::InvalidZero => 0.0,
+            PressureMeassureUnits::Pa => 100000.0,
+            PressureMeassureUnits::Bar => 1.0,
+            PressureMeassureUnits::At => 1.0197162,
+            PressureMeassureUnits::MmH20 => 10197.162,
+            PressureMeassureUnits::MHg => 750.06158 / 1000.0,
+            PressureMeassureUnits::Atm => 0.98692327,
+            PressureMeassureUnits::PSI => 14.5,
+        };
+
+        value * multiplier
+    }
 }
 
 #[derive(Debug, Copy, Clone, Serialize)]
