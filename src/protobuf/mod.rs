@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 
 //mod change_password;
-//mod device_info;
+mod device_info;
 mod encode_md_message;
 mod md;
 mod message_body;
@@ -10,7 +10,7 @@ mod messages;
 mod new_response;
 mod output;
 mod process_request;
-//mod process_settings;
+mod process_settings;
 mod stream;
 
 pub use encode_md_message::encode_md_message;

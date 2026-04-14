@@ -67,8 +67,10 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     output: &mut Sender<'static, Vec<u8>, N>,
     timestamp_getter: impl Fn() -> u32,
     output_getter: &mut impl FnMut() -> OutputStorage,
-    config_getter: &mut impl FnMut() -> (settings::AppSettings, settings::NonStoreSettings),
-) -> Result<(), protobuf::ProtobufProcessError<IE, NoReceiver<Vec<u8>>>> {
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> Result<bool, protobuf::ProtobufProcessError<IE, NoReceiver<Vec<u8>>>> {
     let request = {
         let msg_size = protobuf::recive_md_header_async(input_stream).await?;
         let req = protobuf::recive_message_body_async(input_stream, msg_size).await?;
@@ -77,7 +79,8 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     };
 
     let mut response = protobuf::new_response(request.id, timestamp_getter());
-    protobuf::process_request(&request, &mut response, output_getter, config_getter);
+    let need_to_write =
+        protobuf::process_request(&request, &mut response, output_getter, with_settings);
 
     {
         defmt::trace!("Protobuf response: {}", defmt::Debug2Format(&response));
@@ -89,5 +92,5 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
             .map_err(protobuf::ProtobufProcessError::from_output_error)?;
     }
 
-    Ok(())
+    Ok(need_to_write)
 }

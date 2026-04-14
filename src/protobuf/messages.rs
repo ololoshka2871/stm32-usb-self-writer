@@ -7,8 +7,8 @@ pub const P_COEFFS_COUNT: usize = 16;
 pub const T_COEFFS_COUNT: usize = 5;
 pub const PASSWORD_SIZE: usize = 10;
 
-impl PCoefficients {
-    pub(crate) fn from(p_coeffs: &crate::settings::P16Coeffs) -> Self {
+impl From<&crate::settings::P16Coeffs> for PCoefficients {
+    fn from(p_coeffs: &crate::settings::P16Coeffs) -> Self {
         Self {
             ft0: Some(p_coeffs.fp0),
             fp0: Some(p_coeffs.ft0),
@@ -33,8 +33,8 @@ impl PCoefficients {
     }
 }
 
-impl T5Coefficients {
-    pub(crate) fn from(t_coeffs: &crate::settings::T5Coeffs) -> Self {
+impl From<&crate::settings::T5Coeffs> for T5Coefficients {
+    fn from(t_coeffs: &crate::settings::T5Coeffs) -> Self {
         Self {
             t0: Some(t_coeffs.t0),
             f0: Some(t_coeffs.f0),
@@ -48,15 +48,17 @@ impl T5Coefficients {
     }
 }
 
-impl WorkRange {
-    pub(crate) fn from(wr: &crate::settings::WorkRange) -> Self {
+impl From<&crate::settings::WorkRange> for WorkRange {
+    fn from(wr: &crate::settings::WorkRange) -> Self {
         Self {
             minimum: Some(wr.minimum),
             maximum: Some(wr.maximum),
             absolute_maximum: Some(wr.absolute_maximum),
         }
     }
+}
 
+impl WorkRange {
     pub(crate) fn validate(&self) -> Result<(), WorkRangeError> {
         if let Some(absolute_maximum) = self.absolute_maximum {
             if self.maximum.is_some() && absolute_maximum < self.maximum.unwrap_or_default() {
@@ -85,15 +87,17 @@ pub enum DateField {
     Past,
 }
 
-impl CalibrationDate {
-    pub(crate) fn from(cd: &crate::settings::CalibrationDate) -> Self {
+impl From<&crate::settings::CalibrationDate> for CalibrationDate {
+    fn from(cd: &crate::settings::CalibrationDate) -> Self {
         Self {
             day: Some(cd.day),
             month: Some(cd.month),
             year: Some(cd.year),
         }
     }
+}
 
+impl CalibrationDate {
     pub fn validate(&self) -> Result<(), DateField> {
         use my_proc_macro::{build_day, build_month, build_year};
 
@@ -133,8 +137,8 @@ pub enum WorkRangeError {
     MaximumAboveAbasoluteMaximum,
 }
 
-impl WriteConfig {
-    pub(crate) fn from(wc: &crate::settings::WriteConfig) -> Self {
+impl From<&crate::settings::WriteConfig> for WriteConfig {
+    fn from(wc: &crate::settings::WriteConfig) -> Self {
         Self {
             base_interval_ms: Some(wc.base_interval_ms),
             p_write_devider: Some(wc.p_write_devider),

@@ -6,15 +6,17 @@ pub fn process_request(
     req: &super::messages::Request,
     resp: &mut super::messages::Response,
     output_getter: &mut impl FnMut() -> OutputStorage,
-    config_getter: &mut impl FnMut() -> (settings::AppSettings, settings::NonStoreSettings),
-) {
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> bool {
     if !(req.device_id == super::messages::Info::PressureSelfWriterId as u32
         || req.device_id == super::messages::Info::IdDiscover as u32)
     {
         defmt::error!("Protobuf: unknown target device id: 0x{:X}", req.device_id);
 
         resp.global_status = super::messages::Status::ProtocolError as i32;
-        return;
+        return false;
     }
 
     match req.protocol_version {
@@ -22,35 +24,31 @@ pub fn process_request(
         v => {
             defmt::warn!("Protobuf: unsupported protocol version {}", v);
             resp.global_status = super::messages::Status::ProtocolError as i32;
-            return;
+            return false;
         }
     }
 
-    //if let Some(write_settings) = req.write_settings {
-    //    match super::process_settings::update_settings(&write_settings, cq) {
-    //        Ok(need_to_write) => {
-    //            if let Err(e) = start_writing_settings(need_to_write) {
-    //                free_rtos_settings_error(e);
-    //                resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
-    //            }
-    //        }
-    //        Err(e) => {
-    //            defmt::error!("Set settings error: {}", defmt::Debug2Format(&e));
-    //            resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
-    //        }
-    //    }
-    //    let mut get_settings = super::messages::SettingsResponse::default();
-    //    super::process_settings::fill_settings(&mut get_settings)?;
-    //    resp.get_settings = Some(get_settings);
-    //}
+    let mut need_to_write_settings = false;
 
-    //if req.get_info.is_some() {
-    //    let mut info = super::messages::InfoResponse::default();
-    //    if let Err(_) = super::device_info::fill_info(&mut info, output) {
-    //        resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
-    //    }
-    //    resp.info = Some(info);
-    //}
+    if let Some(write_settings) = &req.write_settings {
+        match super::process_settings::update_settings(&write_settings, with_settings) {
+            Ok(need_to_write) => need_to_write_settings = need_to_write,
+            Err(e) => {
+                defmt::error!("Set settings error: {}", e);
+                resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
+            }
+        }
+        let mut get_settings = super::messages::SettingsResponse::default();
+        super::process_settings::fill_settings(&mut get_settings, with_settings);
+        resp.get_settings = Some(get_settings);
+    }
+
+    if req.get_info.is_some() {
+        let mut info = super::messages::InfoResponse::default();
+        let output_data = output_getter();
+        super::device_info::fill_info(&mut info, &output_data, with_settings);
+        resp.info = Some(info);
+    }
 
     //if let Some(change_password) = req.change_password {
     //    resp.change_password_status = Some(super::messages::ChangePasswordStatus {
@@ -112,6 +110,8 @@ pub fn process_request(
         super::output::fill_output(&mut out, &req, &output_data);
         resp.output = Some(out);
     }
+
+    need_to_write_settings
 }
 
 //fn fill_flash_state(

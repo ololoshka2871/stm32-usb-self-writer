@@ -482,7 +482,7 @@ mod app {
                     last_imput_updated = last_updated;
                 }
             }
-            
+
             let s = settings.lock(|settings| settings.ref_mut().0.clone());
 
             let monitoring = {
@@ -622,6 +622,10 @@ mod app {
                             wait = short_wait; // fast response
                         }
                     }
+                    Err(usb_device::UsbError::WouldBlock) => {
+                        tx_data.replace(data);
+                        wait = short_wait; // fast response
+                    }
                     Err(e) => {
                         defmt::error!("Failed to send data over USB: {}", defmt::Debug2Format(&e));
                     }
@@ -636,32 +640,53 @@ mod app {
 
     #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
-        use alloc::boxed::Box;
-
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
         let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
         let protobuf_output_tx = ctx.local.protobuf_output_tx;
 
-        let mut get_output = Box::new(move || output_storage.lock(|storage| storage.clone()));
-        let mut config_getter = Box::new(move || {
-            settings.lock(|settings| {
-                let s = settings.ref_mut();
-                (s.0.clone(), s.1.clone())
-            })
-        });
+        let mut get_output = move || output_storage.lock(|storage| storage.clone());
+        let mut with_settings = move |f: &mut dyn FnMut(
+            &mut (settings::AppSettings, settings::NonStoreSettings),
+        ) -> (bool, bool)| {
+            let mut s: (settings::AppSettings, settings::NonStoreSettings) =
+                settings.lock(|settings| {
+                    let s = settings.ref_mut();
+                    (s.0.clone(), s.1.clone())
+                });
+
+            let (modified, save) = f(&mut s);
+
+            if modified {
+                settings.lock(move |settings| {
+                    let rs = settings.ref_mut();
+                    *rs.0 = s.0;
+                    *rs.1 = s.1;
+                });
+            }
+
+            save
+        };
 
         loop {
-            if let Err(e) = impls::process_protobuf(
+            match impls::process_protobuf(
                 &mut rx_stream,
                 protobuf_output_tx,
                 || Mono::now().ticks(),
                 &mut get_output,
-                &mut config_getter,
+                &mut with_settings,
             )
             .await
             {
-                defmt::error!("Protobuf error: {}", e);
+                Err(e) => {
+                    defmt::error!("Protobuf error: {}", e);
+                }
+                Ok(true) => {
+                    if let Err(_) = settings_saver::spawn() {
+                        defmt::error!("Failed to spawn settings_saver task");
+                    }
+                }
+                _ => (),
             }
         }
     }

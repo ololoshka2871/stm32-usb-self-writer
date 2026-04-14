@@ -1,5 +1,6 @@
 mod app_settings;
 mod flash_rw_polcy;
+mod settings_action_error;
 
 pub use app_settings::*;
 use flash_settings_rs::SettingsManager;
@@ -7,15 +8,14 @@ use flash_settings_rs::SettingsManager;
 pub use flash_rw_polcy::{FlasRWPolcy, Placeholder};
 pub use my_proc_macro::{build_day, build_month, build_year};
 
-use crate::support::crc::ZlibCompantCrc32;
+pub use settings_action_error::SettingActionError;
 
-pub static MAX_MT: u32 = 5000;
-pub static MIN_MT: u32 = 20;
+use crate::{config, support::crc::ZlibCompantCrc32};
 
 static DEFAULT_SETTINGS: AppSettings = AppSettings {
     serial: 0,
 
-    fref: crate::config::XTAL_FREQ,
+    fref: config::XTAL_FREQ,
 
     p_coefficients: app_settings::P16Coeffs {
         fp0: 0.0,
