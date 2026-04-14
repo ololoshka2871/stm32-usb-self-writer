@@ -449,15 +449,14 @@ mod app {
         );
     }
 
-    #[task(shared = [&rtc_sync, &base_period, output_storage, settings], priority = 2)]
+    #[task(shared = [&base_period, output_storage, settings], priority = 2)]
     async fn calc_results(ctx: calc_results::Context) {
         use stm32_usb_self_writer::{
             support::condition_monitor::{ConditionMonitor, Ordering},
             workmodes::FChannel,
         };
 
-        let rtc_sync = ctx.shared.rtc_sync;
-        let period = *ctx.shared.base_period - config::Duration::millis(1);
+        let period = *ctx.shared.base_period;
 
         let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
@@ -468,12 +467,23 @@ mod app {
         let mut cpu_overheat_monitor = monitor.clone();
         let mut over_power_monitor = monitor.clone();
 
-        loop {
-            rtc_sync.delay_sync(period).await;
+        let mut last_imput_updated = 0u64;
 
-            let s = settings.lock(|settings| settings.ref_mut().0.clone());
+        loop {
+            Mono::delay(period).await;
 
             let mut output = output_storage.lock(|output_storage| output_storage.clone());
+            {
+                // не пересчитывать результаты, если входные данные не обновились
+                let last_updated = output.freq_timestamp();
+                if last_updated <= last_imput_updated {
+                    continue;
+                } else {
+                    last_imput_updated = last_updated;
+                }
+            }
+            
+            let s = settings.lock(|settings| settings.ref_mut().0.clone());
 
             let monitoring = {
                 let t = s
