@@ -10,6 +10,7 @@ pub mod usb_connection_checker;
 pub mod vusb_monitor;
 pub mod crc;
 pub mod usb_periph;
+pub mod condition_monitor;
 
 #[cfg(feature = "stm32l433")]
 mod interrupt_controller_l433;

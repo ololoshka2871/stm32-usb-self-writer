@@ -451,13 +451,22 @@ mod app {
 
     #[task(shared = [&rtc_sync, &base_period, output_storage, settings], priority = 2)]
     async fn calc_results(ctx: calc_results::Context) {
-        use stm32_usb_self_writer::workmodes::FChannel;
+        use stm32_usb_self_writer::{
+            support::condition_monitor::{ConditionMonitor, Ordering},
+            workmodes::FChannel,
+        };
 
         let rtc_sync = ctx.shared.rtc_sync;
         let period = *ctx.shared.base_period - config::Duration::millis(1);
 
         let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
+
+        let monitor = ConditionMonitor::<{ Ordering::Greater }>::new(config::OVER_LIMIT_COUNT);
+        let mut overpress_monitor = monitor.clone();
+        let mut overheat_monitor = monitor.clone();
+        let mut cpu_overheat_monitor = monitor.clone();
+        let mut over_power_monitor = monitor.clone();
 
         loop {
             rtc_sync.delay_sync(period).await;
@@ -466,13 +475,7 @@ mod app {
 
             let mut output = output_storage.lock(|output_storage| output_storage.clone());
 
-            //let monitoring = {
-            //    settings::Monitoring {
-            //        ..Default::default()
-            //    }
-            //};
-
-            {
+            let monitoring = {
                 let t = s
                     .t_coefficients
                     .calc(output.frequencys[FChannel::Temperature as usize])
@@ -487,22 +490,33 @@ mod app {
                 let p = s.pressure_meassure_units.wrap(p) + s.p_zero_correction as f64;
 
                 output.values[FChannel::Pressure as usize] = p;
-            }
+
+                settings::Monitoring {
+                    overpress: overpress_monitor.check(p as f32, s.p_work_range.absolute_maximum),
+                    overheat: overheat_monitor.check(t as f32, s.t_work_range.absolute_maximum),
+                    cpu_overheat: cpu_overheat_monitor
+                        .check(output.t_cpu, s.t_cpu_work_range.absolute_maximum),
+                    over_power: over_power_monitor
+                        .check(output.vbat, s.vbat_work_range.absolute_maximum),
+                }
+            };
 
             output_storage.lock(move |output_storage| {
                 *output_storage = output;
             });
 
-            //if mon != monitoring {
-            //    // обновились флаги выхода за пределы рабочего диапазона
-            //    settings.lock(|settings| {
-            //        let s = settings.ref_mut();
-            //        s.0.monitoring = monitoring;
-            //    });
-            //    if let Err(_) = settings_saver::spawn() {
-            //        defmt::error!("Failed to spawn settings_saver task");
-            //    }
-            //}
+            if s.monitoring.has_new_flags(&monitoring) {
+                // обновились флаги выхода за пределы рабочего диапазона
+
+                defmt::warn!("Monitoring flags updated: {}", monitoring);
+                settings.lock(|settings| {
+                    let s = settings.ref_mut();
+                    s.0.monitoring = monitoring;
+                });
+                if let Err(_) = settings_saver::spawn() {
+                    defmt::error!("Failed to spawn settings_saver task");
+                }
+            }
         }
     }
 

@@ -76,9 +76,9 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
     password: *b"_PASSWORD_",
 
     monitoring: app_settings::Monitoring {
-        ovarpress: false,
-        ovarheat: false,
-        cpu_ovarheat: false,
+        overpress: false,
+        overheat: false,
+        cpu_overheat: false,
         over_power: false,
     },
 };

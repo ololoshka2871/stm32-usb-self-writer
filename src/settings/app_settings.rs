@@ -100,13 +100,36 @@ pub struct WriteConfig {
 }
 
 #[repr(packed(1))]
-#[derive(Debug, Copy, Clone, Serialize, Default, PartialEq)]
+#[derive(Debug, Copy, Clone, Serialize, Default, PartialEq, defmt::Format)]
 #[serde(rename_all = "PascalCase")]
 pub struct Monitoring {
-    pub ovarpress: bool,
-    pub ovarheat: bool,
-    pub cpu_ovarheat: bool,
+    pub overpress: bool,
+    pub overheat: bool,
+    pub cpu_overheat: bool,
     pub over_power: bool,
+}
+
+impl Monitoring {
+    pub fn is_set(&self) -> bool {
+        self.overpress | self.overheat | self.cpu_overheat | self.over_power
+    }
+
+    pub fn has_new_flags(&self, other: &Monitoring) -> bool {
+        if !self.overpress && other.overpress {
+            return true;
+        }
+        if !self.overheat && other.overheat {
+            return true;
+        }
+        if !self.cpu_overheat && other.cpu_overheat {
+            return true;
+        }
+        if !self.over_power && other.over_power {
+            return true;
+        }
+
+        false
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, FromPrimitive)]
@@ -187,10 +210,4 @@ pub struct AppSettings {
 #[derive(Debug, Copy, Clone)]
 pub struct NonStoreSettings {
     pub current_password: [u8; 10],
-}
-
-impl Monitoring {
-    pub fn is_set(&self) -> bool {
-        self.ovarpress | self.ovarheat | self.cpu_ovarheat | self.over_power
-    }
 }

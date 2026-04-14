@@ -10,8 +10,6 @@ use stm32_usb_self_writer::{
     workmodes::output_storage::OutputStorage,
 };
 
-use crate::types;
-
 pub struct AsyncProtobufStream<'a, const N: usize> {
     receiver: &'a mut Receiver<'static, Vec<u8>, N>,
     working_buffer: Vec<u8>,
