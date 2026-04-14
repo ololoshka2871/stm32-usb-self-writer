@@ -19,7 +19,7 @@ pub fn fill_info(
     info.temperature_channel_failed =
         output_data.frequencys[FChannel::Temperature as usize].is_none();
 
-    with_settings(&mut |(app_settings, ts)| {
+    with_settings(&mut |(app_settings, _)| {
         info.overpress_detected = app_settings.monitoring.overpress;
         info.overheat_detected = app_settings.monitoring.overheat;
         info.overheat_cpu_detected = app_settings.monitoring.cpu_overheat;

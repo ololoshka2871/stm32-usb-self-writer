@@ -1,12 +1,12 @@
 use core::fmt::Debug;
 
-//mod change_password;
+mod change_password;
 mod device_info;
 mod encode_md_message;
 mod md;
 mod message_body;
 mod messages;
-//mod monitoring_over_conditions;
+mod monitoring_over_conditions;
 mod new_response;
 mod output;
 mod process_request;

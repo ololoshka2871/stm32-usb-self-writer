@@ -1,12 +1,29 @@
-use freertos_rust::Duration;
+use alloc::string::{String, ToString};
 
-use crate::settings::SettingActionError;
+use crate::settings::{self, SettingActionError};
 
-pub fn reset_monitoring_flags() -> Result<bool, SettingActionError<u32>> {
-    crate::settings::settings_action(Duration::ms(1), |(ws, _)| {
-        let need_store = Ok(ws.monitoring.is_set());
-        ws.monitoring = crate::settings::Monitoring::default();
+pub fn reset_monitoring_flags(
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> Result<bool, SettingActionError<String>> {
+    let mut err = None;
 
-        need_store
-    })
+    let res = with_settings(&mut |(ws, ts)| {
+        if ws.password != ts.current_password {
+            let need_store = ws.monitoring.is_set();
+            ws.monitoring = settings::Monitoring::default();
+
+            (need_store, need_store)
+        } else {
+            err = Some("Invalid password".to_string());
+            (false, false)
+        }
+    });
+
+    if let Some(e) = err {
+        Err(SettingActionError::new(e))
+    } else {
+        Ok(res)
+    }
 }
