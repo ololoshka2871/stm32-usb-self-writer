@@ -1,13 +1,15 @@
 //! Quad Serial Peripheral Interface (QSPI) bus for L4x3
-//! Support only bank 1 for now
 
+use super::iqspi::IQspi;
 use stm32l4xx_hal as hal;
 
 // Пины для L4x3 для QSPI
+#[cfg(feature = "stm32l443")]
+use hal::gpio::gpiob::PB10;
 use hal::gpio::{
     gpioa::{PA2, PA3, PA6, PA7},
-    gpiob::{PB0, PB1, /*PB10,*/ PB11},
-    /*gpiod::{PD3, PD4, PD5, PD6, PD7},*/
+    gpiob::{PB0, PB1, PB11},
+    gpiod::{PD3, PD4, PD5, PD6, PD7},
     gpioe::{PE10, PE11, PE12, PE13, PE14, PE15},
 };
 
@@ -135,6 +137,26 @@ pub enum QspiError {
     Busy,
     Address,
     Unknown,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum FlashBank {
+    Bank1,
+    Bank2,
+    Both,
+}
+
+impl FlashBank {
+    pub fn to_bank_bit(&self) -> bool {
+        match self {
+            FlashBank::Bank1 => false,
+            _ => true,
+        }
+    }
+
+    pub fn is_dual(&self) -> bool {
+        matches!(self, FlashBank::Both)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -297,11 +319,47 @@ impl<'a> QspiReadCommand<'a> {
 
 pub struct Qspi<PINS> {
     qspi: QUADSPI,
-    _pins: PINS,
+    pins: PINS,
     config: QspiConfig,
+    flash_bank: FlashBank,
 }
 
-impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
+impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)>
+{
+    pub fn new_bank1(
+        qspi: QUADSPI,
+        pins: (CLK, NCS, IO0, IO1, IO2, IO3),
+        ahb3: &mut AHB3,
+        config: QspiConfig,
+    ) -> Self
+    where
+        CLK: ClkPin<QUADSPI>,
+        NCS: NCSPin<QUADSPI>,
+        IO0: IO0Pin<QUADSPI>,
+        IO1: IO1Pin<QUADSPI>,
+        IO2: IO2Pin<QUADSPI>,
+        IO3: IO3Pin<QUADSPI>,
+    {
+        Self::init(qspi, pins, ahb3, config, FlashBank::Bank1)
+    }
+
+    pub fn new_bank2(
+        qspi: QUADSPI,
+        pins: (CLK, NCS, IO0, IO1, IO2, IO3),
+        ahb3: &mut AHB3,
+        config: QspiConfig,
+    ) -> Self
+    where
+        CLK: ClkPin<QUADSPI>,
+        NCS: NCSPin<QUADSPI>,
+        IO0: IO0Pin<QUADSPI>,
+        IO1: IO1Pin<QUADSPI>,
+        IO2: IO2Pin<QUADSPI>,
+        IO3: IO3Pin<QUADSPI>,
+    {
+        Self::init(qspi, pins, ahb3, config, FlashBank::Bank2)
+    }
+
     pub fn new(
         qspi: QUADSPI,
         pins: (CLK, NCS, IO0, IO1, IO2, IO3),
@@ -315,6 +373,56 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
         IO1: IO1Pin<QUADSPI>,
         IO2: IO2Pin<QUADSPI>,
         IO3: IO3Pin<QUADSPI>,
+    {
+        Self::new_bank1(qspi, pins, ahb3, config)
+    }
+}
+
+impl<CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2>
+    Qspi<(
+        CLK,
+        NCS1,
+        IO0_1,
+        IO1_1,
+        IO2_1,
+        IO3_1,
+        NCS2,
+        IO0_2,
+        IO1_2,
+        IO2_2,
+        IO3_2,
+    )>
+{
+    pub fn new_dual(
+        qspi: QUADSPI,
+        pins: (
+            CLK,
+            NCS1,
+            IO0_1,
+            IO1_1,
+            IO2_1,
+            IO3_1,
+            NCS2,
+            IO0_2,
+            IO1_2,
+            IO2_2,
+            IO3_2,
+        ),
+        ahb3: &mut AHB3,
+        config: QspiConfig,
+    ) -> Self
+    where
+        CLK: ClkPin<QUADSPI>,
+        NCS1: NCSPin<QUADSPI>,
+        IO0_1: IO0Pin<QUADSPI>,
+        IO1_1: IO1Pin<QUADSPI>,
+        IO2_1: IO2Pin<QUADSPI>,
+        IO3_1: IO3Pin<QUADSPI>,
+        NCS2: NCSPin<QUADSPI>,
+        IO0_2: IO0Pin<QUADSPI>,
+        IO1_2: IO1Pin<QUADSPI>,
+        IO2_2: IO2Pin<QUADSPI>,
+        IO3_2: IO3Pin<QUADSPI>,
     {
         // Enable quad SPI in the clocks.
         QUADSPI::enable(ahb3);
@@ -334,45 +442,78 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
                 .set_bit()
         });
 
-        // Set gpio speed
-        let high_speed_pins = (
-            pins.0.set_speed(Speed::VeryHigh),
-            pins.1.set_speed(Speed::VeryHigh),
-            pins.2.set_speed(Speed::VeryHigh),
-            pins.3.set_speed(Speed::VeryHigh),
-            pins.4.set_speed(Speed::VeryHigh),
-            pins.5.set_speed(Speed::VeryHigh),
-        );
-
         let mut unit = Qspi {
             qspi,
-            _pins: high_speed_pins,
+            pins: pins.set_very_high_speed(),
             config,
+            flash_bank: FlashBank::Both,
         };
         unit.apply_config(config);
         unit
     }
+}
 
-    pub fn fmode(&self) -> u8 {
+impl<PINS> Qspi<PINS> {
+    fn init(
+        qspi: QUADSPI,
+        pins: PINS,
+        ahb3: &mut AHB3,
+        config: QspiConfig,
+        flash_bank: FlashBank,
+    ) -> Self
+    where
+        PINS: QspiPins,
+    {
+        // Enable quad SPI in the clocks.
+        QUADSPI::enable(ahb3);
+
+        // Disable QUADSPI before configuring it.
+        qspi.cr.modify(|_, w| w.en().clear_bit());
+
+        // Clear all pending flags.
+        qspi.fcr.write(|w| {
+            w.ctof()
+                .set_bit()
+                .csmf()
+                .set_bit()
+                .ctcf()
+                .set_bit()
+                .ctef()
+                .set_bit()
+        });
+
+        let mut unit = Qspi {
+            qspi,
+            pins: pins.set_very_high_speed(),
+            config,
+            flash_bank,
+        };
+        unit.apply_config(config);
+        unit
+    }
+}
+
+impl<PINS> super::iqspi::IQspi for Qspi<PINS> {
+    fn fmode(&self) -> u8 {
         self.qspi.ccr.read().fmode().bits()
     }
 
-    pub fn is_busy(&self) -> bool {
+    fn is_busy(&self) -> bool {
         self.qspi.sr.read().busy().bit_is_set()
     }
 
     /// Aborts any ongoing transaction
     /// Note can cause problems if aborting writes to flash satus register
-    pub fn abort_transmission(&self) {
+    fn abort_transmission(&self) {
         self.qspi.cr.modify(|_, w| w.abort().set_bit());
         while self.qspi.sr.read().busy().bit_is_set() {}
     }
 
-    pub fn get_config(&self) -> QspiConfig {
+    fn get_config(&self) -> QspiConfig {
         self.config
     }
 
-    pub fn apply_config(&mut self, config: QspiConfig) {
+    fn apply_config(&mut self, config: QspiConfig) {
         if self.qspi.sr.read().busy().bit_is_set() {
             self.abort_transmission();
         }
@@ -383,14 +524,14 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
 
         while self.qspi.sr.read().busy().bit_is_set() {}
 
-        // Modify the prescaler and select flash bank 1.
+        // Modify the prescaler and select flash bank / dual flash mode.
         self.qspi.cr.modify(|_, w| unsafe {
             w.prescaler()
                 .bits(config.clock_prescaler as u8)
                 .fsel()
-                .clear_bit() // select bank 1
+                .bit(self.flash_bank.to_bank_bit())
                 .dfm()
-                .clear_bit() // dual flash mode disabled
+                .bit(self.flash_bank.is_dual())
                 .sshift()
                 .bit(config.sample_shift == SampleShift::HalfACycle)
         });
@@ -414,7 +555,7 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
         self.config = config;
     }
 
-    pub fn transfer(&self, command: QspiReadCommand, buffer: &mut [u8]) -> Result<(), QspiError> {
+    fn transfer(&self, command: QspiReadCommand, buffer: &mut [u8]) -> Result<(), QspiError> {
         if self.is_busy() {
             return Err(QspiError::Busy);
         }
@@ -564,7 +705,7 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
         Ok(())
     }
 
-    pub fn write(&self, command: QspiWriteCommand) -> Result<(), QspiError> {
+    fn write(&self, command: QspiWriteCommand) -> Result<(), QspiError> {
         if self.is_busy() {
             return Err(QspiError::Busy);
         }
@@ -694,7 +835,7 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
         Ok(())
     }
 
-    pub fn start_memory_mapping(&self, command: QspiWriteCommand) -> Result<(), QspiError> {
+    fn start_memory_mapping(&self, command: QspiWriteCommand) -> Result<(), QspiError> {
         if self.is_busy() {
             return Err(QspiError::Busy);
         }
@@ -715,7 +856,7 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
 
         // data size - max
         self.qspi.dlr.write(|w| unsafe { w.dl().bits(u32::MAX) });
-        
+
         // Write the length and format of data
         if let Some((_, mode)) = command.data {
             /*
@@ -729,7 +870,7 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
                 dmode = mode as u8;
             }
         }
-        
+
         // Write instruction mode
         if let Some((inst, mode)) = command.instruction {
             if self.config.qpi_mode {
@@ -799,7 +940,7 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
                 .bits(instruction)
         });
 
-        /* 
+        /*
         // in QSPI mode address from address bus, so ignore this
         // Write address, triggers send
         if let Some((addr, _)) = command.address {
@@ -846,16 +987,128 @@ impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
     }
 }
 
+impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
+    pub fn destroy(self) -> (QUADSPI, (CLK, NCS, IO0, IO1, IO2, IO3)) {
+        (self.qspi, self.pins)
+    }
+}
+
+impl<CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2>
+    Qspi<(
+        CLK,
+        NCS1,
+        IO0_1,
+        IO1_1,
+        IO2_1,
+        IO3_1,
+        NCS2,
+        IO0_2,
+        IO1_2,
+        IO2_2,
+        IO3_2,
+    )>
+{
+    pub fn destroy(
+        self,
+    ) -> (
+        QUADSPI,
+        (
+            CLK,
+            NCS1,
+            IO0_1,
+            IO1_1,
+            IO2_1,
+            IO3_1,
+            NCS2,
+            IO0_2,
+            IO1_2,
+            IO2_2,
+            IO3_2,
+        ),
+    ) {
+        (self.qspi, self.pins)
+    }
+}
+
+trait QspiPins {
+    fn set_very_high_speed(self) -> Self;
+}
+
+impl<CLK, NCS, IO0, IO1, IO2, IO3> QspiPins for (CLK, NCS, IO0, IO1, IO2, IO3)
+where
+    CLK: ClkPin<QUADSPI>,
+    NCS: NCSPin<QUADSPI>,
+    IO0: IO0Pin<QUADSPI>,
+    IO1: IO1Pin<QUADSPI>,
+    IO2: IO2Pin<QUADSPI>,
+    IO3: IO3Pin<QUADSPI>,
+{
+    fn set_very_high_speed(self) -> Self {
+        (
+            self.0.set_speed(Speed::VeryHigh),
+            self.1.set_speed(Speed::VeryHigh),
+            self.2.set_speed(Speed::VeryHigh),
+            self.3.set_speed(Speed::VeryHigh),
+            self.4.set_speed(Speed::VeryHigh),
+            self.5.set_speed(Speed::VeryHigh),
+        )
+    }
+}
+
+impl<CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2> QspiPins
+    for (
+        CLK,
+        NCS1,
+        IO0_1,
+        IO1_1,
+        IO2_1,
+        IO3_1,
+        NCS2,
+        IO0_2,
+        IO1_2,
+        IO2_2,
+        IO3_2,
+    )
+where
+    CLK: ClkPin<QUADSPI>,
+    NCS1: NCSPin<QUADSPI>,
+    IO0_1: IO0Pin<QUADSPI>,
+    IO1_1: IO1Pin<QUADSPI>,
+    IO2_1: IO2Pin<QUADSPI>,
+    IO3_1: IO3Pin<QUADSPI>,
+    NCS2: NCSPin<QUADSPI>,
+    IO0_2: IO0Pin<QUADSPI>,
+    IO1_2: IO1Pin<QUADSPI>,
+    IO2_2: IO2Pin<QUADSPI>,
+    IO3_2: IO3Pin<QUADSPI>,
+{
+    fn set_very_high_speed(self) -> Self {
+        (
+            self.0.set_speed(Speed::VeryHigh),
+            self.1.set_speed(Speed::VeryHigh),
+            self.2.set_speed(Speed::VeryHigh),
+            self.3.set_speed(Speed::VeryHigh),
+            self.4.set_speed(Speed::VeryHigh),
+            self.5.set_speed(Speed::VeryHigh),
+            self.6.set_speed(Speed::VeryHigh),
+            self.7.set_speed(Speed::VeryHigh),
+            self.8.set_speed(Speed::VeryHigh),
+            self.9.set_speed(Speed::VeryHigh),
+            self.10.set_speed(Speed::VeryHigh),
+        )
+    }
+}
+
 #[cfg(feature = "stm32l433")]
 pins!(
     QUADSPI,
     10,
     CLK: [PA3, PE10],
-    nCS: [PA2, PB11, PE11],
-    IO0: [PB1, PE12],
-    IO1: [PB0, PE13],
-    IO2: [PA7, PE14],
-    IO3: [PA6, PE15]
+    nCS: [PA2, PB11, PE11, PD3],
+    IO0: [PB1, PE12, PD4],
+    IO1: [PB0, PE13, PD5],
+    IO2: [PA7, PE14, PD6],
+    IO3: [PA6, PE15, PD7]
 );
 
 #[cfg(feature = "stm32l443")]

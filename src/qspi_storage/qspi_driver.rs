@@ -1,19 +1,16 @@
 use core::any::Any;
 
 use alloc::{boxed::Box, sync::Arc};
-use freertos_rust::{Duration, Mutex, Timer};
-use qspi_stm32lx3::qspi::QspiWriteCommand;
+use qspi_stm32lx3::{iqspi::IQspi, qspi::QspiWriteCommand};
 
 #[cfg(feature = "stm32l433")]
 pub use qspi_stm32lx3::{qspi, stm32l4x3::QUADSPI};
 
+use embedded_hal::digital::v2::OutputPin;
 pub use qspi::{
     ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin, Qspi, QspiConfig, QspiError, QspiMode,
     QspiReadCommand,
 };
-use stm32l4xx_hal::prelude::OutputPin;
-
-use crate::workmodes::common::HertzExt;
 
 use super::flash_config::FlashConfig;
 
@@ -83,41 +80,29 @@ enum SleepState {
     Working,
 }
 
-pub struct QSpiDriver<CLK, NCS, IO0, IO1, IO2, IO3, RESET>
+pub struct QSpiDriver<RESET>
 where
-    CLK: ClkPin<QUADSPI>,
-    NCS: NCSPin<QUADSPI>,
-    IO0: IO0Pin<QUADSPI>,
-    IO1: IO1Pin<QUADSPI>,
-    IO2: IO2Pin<QUADSPI>,
-    IO3: IO3Pin<QUADSPI>,
     RESET: OutputPin,
 {
-    qspi: Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)>,
+    qspi: Box<dyn IQspi>,
     config: &'static FlashConfig,
     extender_value: u8,
-    sleep_timer: Timer,
+    //sleep_timer: Timer,
     sleep_state: SleepState,
 
     #[allow(unused)]
     reset_pin: RESET,
 }
 
-impl<CLK, NCS, IO0, IO1, IO2, IO3, RESET> QSpiDriver<CLK, NCS, IO0, IO1, IO2, IO3, RESET>
+impl<RESET> QSpiDriver<RESET>
 where
-    CLK: ClkPin<QUADSPI> + 'static,
-    NCS: NCSPin<QUADSPI> + 'static,
-    IO0: IO0Pin<QUADSPI> + 'static,
-    IO1: IO1Pin<QUADSPI> + 'static,
-    IO2: IO2Pin<QUADSPI> + 'static,
-    IO3: IO3Pin<QUADSPI> + 'static,
     RESET: OutputPin + 'static,
 {
     pub fn init(
-        mut qspi: Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)>,
-        sys_clk: stm32l4xx_hal::time::Hertz,
+        mut qspi: Box<dyn IQspi>,
         reset: RESET,
-    ) -> Result<Arc<Mutex<Box<dyn FlashDriver>>>, QspiError> {
+        sys_clk: stm32l4xx_hal::time::Hertz,
+    ) -> Result<() /*Arc<Mutex<Box<dyn FlashDriver>>>*/, QspiError> {
         let config = QspiConfig::default()
             /* failsafe config */
             .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
@@ -129,16 +114,16 @@ where
             qspi,
             config: &super::flash_config::FLASH_CONFIGS[0], // это затычка чотбы ссылка была валидная
             extender_value: 0xff,
-            sleep_timer: {
-                // Этот таймер затчка, только чтобы поле было заполнено, нельзя оставлять его пустым
-                let timer =
-                    Timer::new(sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS))
-                        .set_auto_reload(false)
-                        .create(|_t| {})
-                        .expect("Failed to create temp timer");
-                timer.stop(Duration::infinite()).ok();
-                timer
-            },
+            //sleep_timer: {
+            //    // Этот таймер затчка, только чтобы поле было заполнено, нельзя оставлять его пустым
+            //    let timer =
+            //        Timer::new(sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS))
+            //            .set_auto_reload(false)
+            //            .create(|_t| {})
+            //            .expect("Failed to create temp timer");
+            //    timer.stop(Duration::infinite()).ok();
+            //    timer
+            //},
             sleep_state: SleepState::Slepping,
             reset_pin: reset,
         };
@@ -175,43 +160,44 @@ where
                     defmt::info!("Initialised QSPI flash: {}", config);
 
                     let b: Box<dyn FlashDriver> = Box::new(res);
-                    let arc = Arc::new(Mutex::new(b).map_err(|_| QspiError::Unknown)?);
-
-                    if let Ok(mut guard) = arc.lock(Duration::infinite()) {
-                        let pg = match guard.as_mut_any().downcast_mut::<Self>() {
-                            Some(pg) => pg,
-                            None => unreachable!(),
-                        };
-                        let res_clone = arc.clone();
-                        let timer = Timer::new(
-                            sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS),
-                        )
-                        .set_name("FlashSleep")
-                        .set_auto_reload(true)
-                        .create(move |timer| {
-                            if let Ok(mut guard) = res_clone.lock(Duration::zero()) {
-                                if let Some(pg) = guard.as_mut_any().downcast_mut::<Self>() {
-                                    if pg.sleep_state == SleepState::Waiting {
-                                        if let Err(e) = pg.enter_sleep() {
-                                            defmt::error!(
-                                                "Flash sleep timer: {}",
-                                                defmt::Debug2Format(&e)
-                                            );
-                                        } else {
-                                            let _ = timer.stop(Duration::infinite());
-                                        }
-                                    }
-                                }
-                            }
-                        })
-                        .map_err(|_| QspiError::Unknown)?;
-                        let _ = timer.stop(Duration::infinite());
-                        let _ = core::mem::replace(&mut pg.sleep_timer, timer);
-                    } else {
-                        unreachable!();
-                    }
-
-                    Ok(arc)
+                    //let arc = Arc::new(Mutex::new(b).map_err(|_| QspiError::Unknown)?);
+                    //
+                    //if let Ok(mut guard) = arc.lock(Duration::infinite()) {
+                    //    let pg = match guard.as_mut_any().downcast_mut::<Self>() {
+                    //        Some(pg) => pg,
+                    //        None => unreachable!(),
+                    //    };
+                    //    let res_clone = arc.clone();
+                    //    //let timer = Timer::new(
+                    //    //    sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS),
+                    //    //)
+                    //    //.set_name("FlashSleep")
+                    //    //.set_auto_reload(true)
+                    //    //.create(move |timer| {
+                    //    //    if let Ok(mut guard) = res_clone.lock(Duration::zero()) {
+                    //    //        if let Some(pg) = guard.as_mut_any().downcast_mut::<Self>() {
+                    //    //            if pg.sleep_state == SleepState::Waiting {
+                    //    //                if let Err(e) = pg.enter_sleep() {
+                    //    //                    defmt::error!(
+                    //    //                        "Flash sleep timer: {}",
+                    //    //                        defmt::Debug2Format(&e)
+                    //    //                    );
+                    //    //                } else {
+                    //    //                    let _ = timer.stop(Duration::infinite());
+                    //    //                }
+                    //    //            }
+                    //    //        }
+                    //    //    }
+                    //    //})
+                    //    //.map_err(|_| QspiError::Unknown)?;
+                    //    //let _ = timer.stop(Duration::infinite());
+                    //    //let _ = core::mem::replace(&mut pg.sleep_timer, timer);
+                    //} else {
+                    //    unreachable!();
+                    //}
+                    //
+                    //Ok(arc)
+                    Err(QspiError::Unknown)
                 } else {
                     defmt::error!("Failed to verify id in QSPI mode");
                     Err(QspiError::Unknown)
@@ -220,35 +206,6 @@ where
         } else {
             defmt::error!("Unknown QSPI flash JDEC ID: {}", defmt::Debug2Format(&id));
             Err(QspiError::Unknown)
-        }
-    }
-
-    pub fn get_jedec_id_cfg(&mut self, use_qspi: bool) -> Result<super::Identification, QspiError> {
-        let get_id_command = QspiReadCommand {
-            instruction: if use_qspi {
-                Some((Opcode::ReadJedecIdMIO as u8, QspiMode::QuadChannel))
-            } else {
-                Some((Opcode::ReadJedecId as u8, QspiMode::SingleChannel))
-            },
-            address: None,
-            alternative_bytes: None,
-            dummy_cycles: 0,
-            data_mode: if use_qspi {
-                QspiMode::QuadChannel
-            } else {
-                QspiMode::SingleChannel
-            },
-            receive_length: 3,
-            double_data_rate: false,
-        };
-        let mut id_arr = [0; 3];
-
-        self.qspi.transfer(get_id_command, &mut id_arr)?;
-
-        if id_arr == [0, 0, 0] || id_arr == [0xff, 0xff, 0xff] {
-            Err(QspiError::Unknown)
-        } else {
-            Ok(super::Identification::from_jedec_id(&id_arr))
         }
     }
 
@@ -299,23 +256,16 @@ where
     }
 }
 
-impl<CLK, NCS, IO0, IO1, IO2, IO3, RESET> FlashDriver
-    for QSpiDriver<CLK, NCS, IO0, IO1, IO2, IO3, RESET>
+impl<RESET> FlashDriver for QSpiDriver<RESET>
 where
-    CLK: ClkPin<QUADSPI> + 'static,
-    NCS: NCSPin<QUADSPI> + 'static,
-    IO0: IO0Pin<QUADSPI> + 'static,
-    IO1: IO1Pin<QUADSPI> + 'static,
-    IO2: IO2Pin<QUADSPI> + 'static,
-    IO3: IO3Pin<QUADSPI> + 'static,
     RESET: OutputPin + 'static,
 {
     fn get_jedec_id(&mut self) -> Result<super::Identification, QspiError> {
-        self.get_jedec_id_cfg(false)
+        get_jedec_id_cfg(self.qspi.as_mut(), false)
     }
 
     fn get_jedec_id_qio(&mut self) -> Result<super::Identification, QspiError> {
-        self.get_jedec_id_cfg(true)
+        get_jedec_id_cfg(self.qspi.as_mut(), true)
     }
 
     fn get_capacity(&self) -> usize {
@@ -386,7 +336,7 @@ where
 
             while self.is_busy(true)? {
                 /* wait write complead */
-                freertos_rust::CurrentTask::delay(Duration::ticks(1));
+                //freertos_rust::CurrentTask::delay(Duration::ticks(1));
             }
 
             // Sets the write enable latch bit before each PROGRAM, ERASE, and WRITE command.
@@ -497,7 +447,7 @@ where
         {
             if self.sleep_state == SleepState::Working {
                 self.sleep_state = SleepState::Waiting;
-                let _ = self.sleep_timer.start(Duration::infinite());
+                //let _ = self.sleep_timer.start(Duration::infinite());
             }
         }
     }
@@ -512,29 +462,42 @@ where
 }
 
 // Маркерные трейты, чтобы наконец позволить сделать таймер, захватывающий драйвер в лямбду
+unsafe impl<RESET> Sync for QSpiDriver<RESET> where RESET: OutputPin + 'static {}
 
-unsafe impl<CLK, NCS, IO0, IO1, IO2, IO3, RESET> Sync
-    for QSpiDriver<CLK, NCS, IO0, IO1, IO2, IO3, RESET>
-where
-    CLK: ClkPin<QUADSPI> + 'static,
-    NCS: NCSPin<QUADSPI> + 'static,
-    IO0: IO0Pin<QUADSPI> + 'static,
-    IO1: IO1Pin<QUADSPI> + 'static,
-    IO2: IO2Pin<QUADSPI> + 'static,
-    IO3: IO3Pin<QUADSPI> + 'static,
-    RESET: OutputPin + 'static,
-{
-}
+unsafe impl<RESET> Send for QSpiDriver<RESET> where RESET: OutputPin + 'static {}
 
-unsafe impl<CLK, NCS, IO0, IO1, IO2, IO3, RESET> Send
-    for QSpiDriver<CLK, NCS, IO0, IO1, IO2, IO3, RESET>
-where
-    CLK: ClkPin<QUADSPI> + 'static,
-    NCS: NCSPin<QUADSPI> + 'static,
-    IO0: IO0Pin<QUADSPI> + 'static,
-    IO1: IO1Pin<QUADSPI> + 'static,
-    IO2: IO2Pin<QUADSPI> + 'static,
-    IO3: IO3Pin<QUADSPI> + 'static,
-    RESET: OutputPin + 'static,
-{
+//-----------------------------------------------------------------------------
+
+pub fn get_jedec_id_cfg(
+    qspi: &mut dyn qspi_stm32lx3::iqspi::IQspi,
+    use_qspi: bool,
+) -> Result<super::Identification, QspiError> {
+    use qspi_stm32lx3::iqspi::IQspi;
+
+    let get_id_command = QspiReadCommand {
+        instruction: if use_qspi {
+            Some((Opcode::ReadJedecIdMIO as u8, QspiMode::QuadChannel))
+        } else {
+            Some((Opcode::ReadJedecId as u8, QspiMode::SingleChannel))
+        },
+        address: None,
+        alternative_bytes: None,
+        dummy_cycles: 0,
+        data_mode: if use_qspi {
+            QspiMode::QuadChannel
+        } else {
+            QspiMode::SingleChannel
+        },
+        receive_length: 3,
+        double_data_rate: false,
+    };
+    let mut id_arr = [0; 3];
+
+    qspi.transfer(get_id_command, &mut id_arr)?;
+
+    if id_arr == [0, 0, 0] || id_arr == [0xff, 0xff, 0xff] {
+        Err(QspiError::Unknown)
+    } else {
+        Ok(super::Identification::from_jedec_id(&id_arr))
+    }
 }

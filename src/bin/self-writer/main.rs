@@ -224,6 +224,66 @@ mod app {
         );
         defmt::info!("\tFreqmeter 2");
 
+        {
+            let flash_reset_pin = gpiod
+                .pd11
+                .into_push_pull_output(&mut gpiod.moder, &mut gpiod.otyper);
+            let clk_pin =
+                gpioa
+                    .pa3
+                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl);
+
+            let pins_ch1 = (
+                gpioa
+                    .pa2
+                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+                #[cfg(not(feature = "maket"))]
+                gpiob
+                    .pb1
+                    .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
+                #[cfg(feature = "maket")]
+                gpioe
+                    .pe12
+                    .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
+                gpiob
+                    .pb0
+                    .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
+                gpioa
+                    .pa7
+                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+                gpioa
+                    .pa6
+                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl),
+            );
+            let pins_ch2 = (
+                gpiod
+                    .pd3
+                    .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
+                gpiod
+                    .pd4
+                    .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
+                gpiod
+                    .pd5
+                    .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
+                gpiod
+                    .pd6
+                    .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
+                gpiod
+                    .pd7
+                    .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
+            );
+
+            init_storage(
+                unsafe { qspi_stm32lx3::stm32l4x3::QUADSPI::new() },
+                flash_reset_pin,
+                clk_pin,
+                pins_ch1,
+                pins_ch2,
+                &mut rcc,
+                &clocks,
+            );
+        }
+
         let (usb_dev, scsi, serial) = init_usb(
             fast_mode,
             UsbPeriph {

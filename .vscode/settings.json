@@ -16,6 +16,6 @@
         "--all-targets",
         "--keep-going",
         "--release",
-        "--features=xtal-24mhz"
+        "--features=\"xtal-24mhz,maket\""
     ],
 }

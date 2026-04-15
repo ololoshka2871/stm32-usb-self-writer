@@ -1,7 +1,6 @@
-use freertos_rust::Duration;
 use qspi_stm32lx3::qspi::{QspiError, QspiMode, QspiReadCommand, QspiWriteCommand};
 
-use crate::main_data_storage::qspi_storage::qspi_driver::FlashDriver;
+use super::super::qspi_driver::FlashDriver;
 
 bitflags::bitflags! {
     /// Status register bits.
@@ -242,7 +241,7 @@ pub fn chip_erase(driver: &mut dyn FlashDriver, qspi_mode: bool) -> Result<(), Q
 
         while is_busy(driver, qspi_mode)? {
             /* wait write complead */
-            freertos_rust::CurrentTask::delay(Duration::ticks(10));
+            //freertos_rust::CurrentTask::delay(Duration::ticks(10));
         }
     }
     Ok(())
