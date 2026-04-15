@@ -207,7 +207,7 @@ pub struct AppSettings {
     pub monitoring: Monitoring,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct NonStoreSettings {
-    pub current_password: [u8; 10],
+    pub current_password: [u8; crate::protobuf::PASSWORD_SIZE],
 }

@@ -5,15 +5,16 @@ extern crate alloc;
 
 pub mod clocking;
 pub mod config;
+pub mod protobuf;
 pub mod sensors;
 pub mod settings;
 pub mod support;
-pub mod protobuf;
+pub mod vfs;
 pub mod workmodes;
 
 pub use crate::support::{
-    interrupt_controller::IInterruptController, nop_delay::NOPDelay, power_ctrl::PowerCtrl,
-    rtc_sync::RtcSync, InputChannel, InterruptController,
+    InputChannel, InterruptController, interrupt_controller::IInterruptController,
+    nop_delay::NOPDelay, power_ctrl::PowerCtrl, rtc_sync::RtcSync,
 };
 
 //

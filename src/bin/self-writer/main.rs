@@ -77,7 +77,11 @@ mod app {
         flash_policy: settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32>,
 
         usb_dev: usb_device::device::UsbDevice<'static, stm32_usbd::UsbBus<UsbPeriph>>,
-        scsi: (),
+        scsi: usbd_scsi::Scsi<
+            'static,
+            stm32_usbd::UsbBus<UsbPeriph>,
+            stm32_usb_self_writer::vfs::EMfatStorage,
+        >,
         serial: usbd_serial::CdcAcmClass<'static, stm32_usbd::UsbBus<UsbPeriph>>,
         usb_notify: no_std_async::Condvar,
 
@@ -559,7 +563,8 @@ mod app {
             usb_dev,
             scsi,
             serial,
-            led
+            led,
+            settings,
         ],
         local = [
             protobuf_input_tx,
@@ -568,12 +573,15 @@ mod app {
         priority = 1
     )]
     async fn usb_task(ctx: usb_task::Context) {
+        use alloc::boxed::Box;
+
         let usb_notify = ctx.shared.usb_notify;
 
         let mut usb_dev = ctx.shared.usb_dev;
         let mut scsi = ctx.shared.scsi;
         let mut serial = ctx.shared.serial;
         let mut led = ctx.shared.led;
+        let mut settings = ctx.shared.settings;
 
         let protobuf_input_tx = ctx.local.protobuf_input_tx;
         let protobuf_output_rx = ctx.local.protobuf_output_rx;
@@ -586,6 +594,19 @@ mod app {
         let mut tx_data = Option::<Vec<u8>>::None;
         let mut wait = long_wait;
 
+        // Проблема: settings имеет время жизни 'a, и его нельзя упаковать в замыкание и в Box
+        // Гарантируется, что unsafe_settings_ptr будет использован только в стеке этой функции
+        // и не будет передан в другие потоки, поэтому это безопасно
+        let unsafe_settings_ptr =
+            settings.lock(|settings| settings.ref_mut().0 as *const settings::AppSettings);
+        let settings_accessor =
+            move || -> settings::AppSettings { unsafe { &*unsafe_settings_ptr }.clone() };
+
+        scsi.lock(move |scsi| {
+            scsi.block_device_mut()
+                .set_settings_accessor(Box::new(settings_accessor));
+        });
+
         loop {
             led.lock(|led| led.set_state(config::LED_DISABLE));
             Mono::timeout_after(wait, usb_notify.wait()).await.ok();
@@ -595,9 +616,8 @@ mod app {
 
             // Важно! Список передаваемый сюда в том же порядке,
             // что были инициализированы интерфейсы
-            let res = (&mut usb_dev, &mut scsi, &mut serial).lock(|usb_dev, _scsi, serial| {
-                usb_dev.poll(&mut [/*scsi,*/ serial])
-            });
+            let res = (&mut usb_dev, &mut scsi, &mut serial)
+                .lock(|usb_dev, scsi, serial| usb_dev.poll(&mut [scsi, serial]));
 
             if res {
                 while let Ok(data) = serial.lock(|serial| {

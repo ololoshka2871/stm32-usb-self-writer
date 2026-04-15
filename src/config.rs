@@ -18,7 +18,7 @@ pub type Instant = rtic_monotonics::fugit::Instant<u32, 1, { SYST_TIMER_HZ }>;
 
 //-----------------------------------------------------------------------------
 
-pub const HEAP_SIZE: usize = 1024 * 2;
+pub const HEAP_SIZE: usize = 1024 * 4;
 
 //-----------------------------------------------------------------------------
 

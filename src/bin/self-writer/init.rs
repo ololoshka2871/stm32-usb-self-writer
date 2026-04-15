@@ -149,7 +149,7 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     vid_pid: usb_device::device::UsbVidPid,
 ) -> (
     usb_device::device::UsbDevice<'a, stm32_usbd::UsbBus<USB>>,
-    (),
+    usbd_scsi::Scsi<'a, stm32_usbd::UsbBus<USB>, stm32_usb_self_writer::vfs::EMfatStorage>,
     CdcAcmClass<'a, stm32_usbd::UsbBus<USB>>,
 ) {
     if !is_enabled {
@@ -171,17 +171,15 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     let bus: &'a mut UsbBusAllocator<stm32_usbd::UsbBus<USB>> =
         bus.get_or_insert(stm32_usbd::UsbBus::new(periph));
 
-    // TODO:
-    //defmt::info!("Allocating SCSI device");
-    //let mut scsi = Scsi::new(
-    //    bus,
-    //    config::BULK_MAX_PACKET_SIZE as u16, // для устройств full speed: max_packet_size 8, 16, 32 or 64
-    //    EMfatStorage::new(c_str!("LOGGER")),
-    //    "SCTB", // <= max 8 больших букв
-    //    "SelfWriter",
-    //    "L433",
-    //);
-    let scsi = ();
+    defmt::info!("Allocating SCSI device");
+    let scsi = usbd_scsi::Scsi::new(
+        bus,
+        config::BULK_MAX_PACKET_SIZE as u16, // для устройств full speed: max_packet_size 8, 16, 32 or 64
+        stm32_usb_self_writer::vfs::EMfatStorage::new(my_proc_macro::c_str!("LOGGER")),
+        "SCTB", // <= max 8 больших букв
+        "SelfWriter",
+        "L433",
+    );
 
     defmt::info!("Allocating ACM device");
     let serial = usbd_serial::CdcAcmClass::new(bus, config::BULK_MAX_PACKET_SIZE as u16);

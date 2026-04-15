@@ -96,13 +96,7 @@ pub fn init<CRC: ZlibCompantCrc32>(
     defmt::trace!("Init settings");
     let mut policy = FlasRWPolcy::create(&SETTINGS_PLACEHOLDER, flash, crc);
     (
-        SettingsManagerType::new(
-            &DEFAULT_SETTINGS,
-            NonStoreSettings {
-                current_password: [0u8; 10],
-            },
-            &mut policy,
-        ),
+        SettingsManagerType::new(&DEFAULT_SETTINGS, NonStoreSettings::default(), &mut policy),
         policy,
     )
 }
