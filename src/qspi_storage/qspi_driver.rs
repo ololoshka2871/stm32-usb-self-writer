@@ -1,4 +1,4 @@
-use core::any::Any;
+use core::cell::RefCell;
 
 use alloc::{boxed::Box, sync::Arc};
 use qspi_stm32lx3::{iqspi::IQspi, qspi::QspiWriteCommand};
@@ -6,11 +6,13 @@ use qspi_stm32lx3::{iqspi::IQspi, qspi::QspiWriteCommand};
 #[cfg(feature = "stm32l433")]
 pub use qspi_stm32lx3::{qspi, stm32l4x3::QUADSPI};
 
-use embedded_hal::digital::v2::OutputPin;
 pub use qspi::{
     ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin, Qspi, QspiConfig, QspiError, QspiMode,
     QspiReadCommand,
 };
+use rtic_monotonics::Monotonic;
+
+use crate::config;
 
 use super::flash_config::FlashConfig;
 
@@ -51,8 +53,6 @@ pub enum Opcode {
 }
 #[allow(dead_code)]
 pub trait FlashDriver: Sync + Send {
-    fn get_jedec_id(&mut self) -> Result<super::Identification, QspiError>;
-    fn get_jedec_id_qio(&mut self) -> Result<super::Identification, QspiError>;
     fn get_capacity(&self) -> usize;
     fn erase(&mut self) -> Result<(), QspiError>;
 
@@ -68,72 +68,38 @@ pub trait FlashDriver: Sync + Send {
     fn set_addr_extender(&mut self, extender_value: u8) -> Result<(), QspiError>;
     fn wake_up(&mut self) -> Result<(), QspiError>;
     fn want_sleep(&mut self);
-
-    fn as_any(&self) -> &dyn Any;
-    fn as_mut_any(&mut self) -> &mut dyn Any;
 }
 
 #[derive(PartialEq)]
 enum SleepState {
     Slepping,
-    Waiting,
+    Waiting { sleep_at: config::Instant },
     Working,
 }
 
-pub struct QSpiDriver<RESET>
-where
-    RESET: OutputPin,
-{
+pub struct QSpiDriver<M> {
     qspi: Box<dyn IQspi>,
     config: &'static FlashConfig,
     extender_value: u8,
     //sleep_timer: Timer,
     sleep_state: SleepState,
-
-    #[allow(unused)]
-    reset_pin: RESET,
+    dual: bool,
+    _m: core::marker::PhantomData<M>,
 }
 
-impl<RESET> QSpiDriver<RESET>
-where
-    RESET: OutputPin + 'static,
-{
+impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static> QSpiDriver<M> {
     pub fn init(
         mut qspi: Box<dyn IQspi>,
-        reset: RESET,
+        id: super::Identification,
+        dual: bool,
         sys_clk: stm32l4xx_hal::time::Hertz,
-    ) -> Result<() /*Arc<Mutex<Box<dyn FlashDriver>>>*/, QspiError> {
+    ) -> Result<Arc<RefCell<Box<dyn FlashDriver>>>, QspiError> {
         let config = QspiConfig::default()
             /* failsafe config */
             .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
             .clock_mode(qspi::ClockMode::Mode3);
 
         qspi.apply_config(config);
-
-        let mut res = Self {
-            qspi,
-            config: &super::flash_config::FLASH_CONFIGS[0], // это затычка чотбы ссылка была валидная
-            extender_value: 0xff,
-            //sleep_timer: {
-            //    // Этот таймер затчка, только чтобы поле было заполнено, нельзя оставлять его пустым
-            //    let timer =
-            //        Timer::new(sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS))
-            //            .set_auto_reload(false)
-            //            .create(|_t| {})
-            //            .expect("Failed to create temp timer");
-            //    timer.stop(Duration::infinite()).ok();
-            //    timer
-            //},
-            sleep_state: SleepState::Slepping,
-            reset_pin: reset,
-        };
-
-        let id = match res.get_jedec_id() {
-            Ok(id) => id,
-            Err(e) => {
-                return Err(e);
-            }
-        };
 
         let config = super::flash_config::FLASH_CONFIGS.iter().find_map(|cfg| {
             if cfg.vendor_id == id.mfr_code() && cfg.capacity_code == id.device_id()[1] {
@@ -145,63 +111,25 @@ where
 
         if let Some(config) = config {
             defmt::info!("Found flash: {}", config);
-            let _ = core::mem::replace(&mut res.config, config);
+            let mut res = Self {
+                qspi,
+                config,
+                extender_value: 0xff,
+                sleep_state: SleepState::Slepping,
+                dual,
+                _m: core::marker::PhantomData,
+            };
 
-            if let Err(e) = res.wake_up() {
-                return Err(e);
-            }
+            res.wake_up()?;
 
-            if let Err(e) = config.configure(&mut res, sys_clk) {
+            if let Err(e) = config.configure(&mut res, dual, sys_clk) {
                 defmt::error!("Failed to init flash!");
                 Err(e)
             } else {
-                let newid = res.get_jedec_id_qio()?;
-                if newid == id {
-                    defmt::info!("Initialised QSPI flash: {}", config);
+                defmt::info!("Initialised QSPI flash: {}", config);
 
-                    let b: Box<dyn FlashDriver> = Box::new(res);
-                    //let arc = Arc::new(Mutex::new(b).map_err(|_| QspiError::Unknown)?);
-                    //
-                    //if let Ok(mut guard) = arc.lock(Duration::infinite()) {
-                    //    let pg = match guard.as_mut_any().downcast_mut::<Self>() {
-                    //        Some(pg) => pg,
-                    //        None => unreachable!(),
-                    //    };
-                    //    let res_clone = arc.clone();
-                    //    //let timer = Timer::new(
-                    //    //    sys_clk.duration_ms(crate::config::FLASH_AUTO_POWER_DOWN_MS),
-                    //    //)
-                    //    //.set_name("FlashSleep")
-                    //    //.set_auto_reload(true)
-                    //    //.create(move |timer| {
-                    //    //    if let Ok(mut guard) = res_clone.lock(Duration::zero()) {
-                    //    //        if let Some(pg) = guard.as_mut_any().downcast_mut::<Self>() {
-                    //    //            if pg.sleep_state == SleepState::Waiting {
-                    //    //                if let Err(e) = pg.enter_sleep() {
-                    //    //                    defmt::error!(
-                    //    //                        "Flash sleep timer: {}",
-                    //    //                        defmt::Debug2Format(&e)
-                    //    //                    );
-                    //    //                } else {
-                    //    //                    let _ = timer.stop(Duration::infinite());
-                    //    //                }
-                    //    //            }
-                    //    //        }
-                    //    //    }
-                    //    //})
-                    //    //.map_err(|_| QspiError::Unknown)?;
-                    //    //let _ = timer.stop(Duration::infinite());
-                    //    //let _ = core::mem::replace(&mut pg.sleep_timer, timer);
-                    //} else {
-                    //    unreachable!();
-                    //}
-                    //
-                    //Ok(arc)
-                    Err(QspiError::Unknown)
-                } else {
-                    defmt::error!("Failed to verify id in QSPI mode");
-                    Err(QspiError::Unknown)
-                }
+                let b: Box<dyn FlashDriver> = Box::new(res);
+                Ok(Arc::new(RefCell::new(b)))
             }
         } else {
             defmt::error!("Unknown QSPI flash JDEC ID: {}", defmt::Debug2Format(&id));
@@ -214,9 +142,7 @@ where
     }
 
     fn enter_sleep(&mut self) -> Result<(), QspiError> {
-        if self.is_memory_mapped() {
-            self.set_memory_mapping_mode(false)?;
-        }
+        self.cancel_memory_mapping()?;
 
         let wake_up_cmd = QspiWriteCommand {
             instruction: Some((
@@ -232,8 +158,6 @@ where
 
         self.qspi.write(wake_up_cmd)?;
 
-        //let _ = self.reset_pin.set_low();
-
         self.sleep_state = SleepState::Slepping;
 
         defmt::trace!("Flash sleep...");
@@ -242,9 +166,7 @@ where
     }
 
     fn is_busy(&mut self, qspi_mode: bool) -> Result<bool, QspiError> {
-        if self.is_memory_mapped() {
-            self.set_memory_mapping_mode(false)?;
-        }
+        self.cancel_memory_mapping()?;
         (self.config.is_busy)(self, qspi_mode)
     }
 
@@ -256,20 +178,11 @@ where
     }
 }
 
-impl<RESET> FlashDriver for QSpiDriver<RESET>
-where
-    RESET: OutputPin + 'static,
+impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static> FlashDriver
+    for QSpiDriver<M>
 {
-    fn get_jedec_id(&mut self) -> Result<super::Identification, QspiError> {
-        get_jedec_id_cfg(self.qspi.as_mut(), false)
-    }
-
-    fn get_jedec_id_qio(&mut self) -> Result<super::Identification, QspiError> {
-        get_jedec_id_cfg(self.qspi.as_mut(), true)
-    }
-
     fn get_capacity(&self) -> usize {
-        self.config.capacity()
+        self.config.capacity(self.dual)
     }
 
     fn erase(&mut self) -> Result<(), QspiError> {
@@ -416,8 +329,6 @@ where
     }
 
     fn wake_up(&mut self) -> Result<(), QspiError> {
-        //let _ = self.reset_pin.set_high();
-
         #[cfg(feature = "flash-sleep")]
         {
             if self.sleep_state == SleepState::Slepping {
@@ -446,25 +357,18 @@ where
         #[cfg(feature = "flash-sleep")]
         {
             if self.sleep_state == SleepState::Working {
-                self.sleep_state = SleepState::Waiting;
-                //let _ = self.sleep_timer.start(Duration::infinite());
+                self.sleep_state = SleepState::Waiting {
+                    sleep_at: M::now() + config::Duration::secs(1),
+                };
             }
         }
-    }
-
-    fn as_any(&self) -> &(dyn Any + 'static) {
-        self
-    }
-
-    fn as_mut_any(&mut self) -> &mut (dyn Any + 'static) {
-        self
     }
 }
 
 // Маркерные трейты, чтобы наконец позволить сделать таймер, захватывающий драйвер в лямбду
-unsafe impl<RESET> Sync for QSpiDriver<RESET> where RESET: OutputPin + 'static {}
+unsafe impl<M> Sync for QSpiDriver<M> {}
 
-unsafe impl<RESET> Send for QSpiDriver<RESET> where RESET: OutputPin + 'static {}
+unsafe impl<M> Send for QSpiDriver<M> {}
 
 //-----------------------------------------------------------------------------
 
@@ -472,8 +376,6 @@ pub fn get_jedec_id_cfg(
     qspi: &mut dyn qspi_stm32lx3::iqspi::IQspi,
     use_qspi: bool,
 ) -> Result<super::Identification, QspiError> {
-    use qspi_stm32lx3::iqspi::IQspi;
-
     let get_id_command = QspiReadCommand {
         instruction: if use_qspi {
             Some((Opcode::ReadJedecIdMIO as u8, QspiMode::QuadChannel))

@@ -2,6 +2,8 @@ pub mod flash_config;
 mod identification;
 pub mod qspi_driver;
 
+use core::cell::RefCell;
+
 use identification::Identification;
 use qspi_stm32lx3::iqspi::IQspi;
 use qspi_stm32lx3::qspi::Qspi;
@@ -14,8 +16,9 @@ use qspi_driver::{FlashDriver, QSpiDriver};
 
 //use super::PageAccessor;
 
-use qspi_driver::{ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin, QUADSPI, QspiError};
+use qspi_driver::QspiError;
 
+use crate::config;
 use crate::main_data_storage::{StorageDriver, StorageInfo};
 
 const QSPI_MEMORY_MAPPED_REGION: *mut u8 = 0x90000000 as *mut u8;
@@ -83,7 +86,7 @@ const QSPI_MEMORY_MAPPED_REGION: *mut u8 = 0x90000000 as *mut u8;
 //}
 
 pub struct QSPIStorage {
-    //driver: Arc<Mutex<Box<dyn FlashDriver + 'static>>>,
+    driver: Arc<RefCell<Box<dyn FlashDriver + 'static>>>,
 }
 
 //impl super::storage::Storage<'static> for QSPIStorage {
@@ -133,20 +136,18 @@ pub struct QSPIStorage {
 //}
 
 impl QSPIStorage {
-    pub fn new<RESET, QSPI>(
+    pub fn new<QSPI, M>(
         qspi: QSPI,
-        reset: RESET,
+        id: Identification,
+        dual: bool,
         sys_clk: stm32l4xx_hal::time::Hertz,
     ) -> Result<Self, QspiError>
     where
-        RESET: embedded_hal::digital::v2::OutputPin + 'static,
         QSPI: IQspi + 'static,
+        M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant>
+            + 'static,
     {
-        if let Ok(driver) = QSpiDriver::init(Box::new(qspi), reset, sys_clk) {
-            Ok(Self {})
-        } else {
-            Err(QspiError::Unknown)
-        }
+        QSpiDriver::<M>::init(Box::new(qspi), id, dual, sys_clk).map(|d| Self { driver: d })
     }
 }
 
@@ -156,21 +157,12 @@ impl StorageDriver for QSPIStorage {
     }
 }
 
-#[inline]
-pub fn probe<CLK, NCS, IO0, IO1, IO2, IO3>(
-    qspi: &mut Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)>,
-    sys_clk: stm32l4xx_hal::time::Hertz,
-) -> Result<Identification, QspiError>
-where
-    CLK: ClkPin<QUADSPI>,
-    NCS: NCSPin<QUADSPI>,
-    IO0: IO0Pin<QUADSPI>,
-    IO1: IO1Pin<QUADSPI>,
-    IO2: IO2Pin<QUADSPI>,
-    IO3: IO3Pin<QUADSPI>,
-{
-    use qspi_stm32lx3::iqspi::IQspi;
+//-----------------------------------------------------------------------------
 
+pub fn probe(
+    qspi: &mut dyn IQspi,
+    sys_clk: stm32l4xx_hal::time::Hertz,
+) -> Result<Identification, QspiError> {
     let config = qspi_stm32lx3::qspi::QspiConfig::default()
         /* failsafe config */
         .clock_prescaler((sys_clk.0 / 1_000_000) as u8)

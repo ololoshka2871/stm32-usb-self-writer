@@ -2,7 +2,9 @@ use qspi_stm32lx3::{
     qspi::{ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin},
     stm32l4x3::QUADSPI,
 };
-use stm32_usb_self_writer::{config, sensors::analog::AnalogSensor, settings};
+use stm32_usb_self_writer::{
+    config, qspi_storage::QSPIStorage, sensors::analog::AnalogSensor, settings,
+};
 use stm32l4xx_hal::{
     adc,
     crc::CrcExt,
@@ -202,7 +204,7 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     (usb_dev, scsi, serial)
 }
 
-pub fn init_storage<R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2>(
+pub fn init_storage<M, R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2>(
     qspi: QUADSPI,
     mut flash_reset_pin: R,
     clk_pin: CLK,
@@ -210,19 +212,21 @@ pub fn init_storage<R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2
     pins_ch2: (NCS2, IO0_2, IO1_2, IO2_2, IO3_2),
     rcc: &mut rcc::Rcc,
     clocks: &Clocks,
-) where
-    R: embedded_hal::digital::v2::OutputPin,
-    CLK: ClkPin<QUADSPI>,
-    NCS1: NCSPin<QUADSPI>,
-    IO0_1: IO0Pin<QUADSPI>,
-    IO1_1: IO1Pin<QUADSPI>,
-    IO2_1: IO2Pin<QUADSPI>,
-    IO3_1: IO3Pin<QUADSPI>,
-    NCS2: NCSPin<QUADSPI>,
-    IO0_2: IO0Pin<QUADSPI>,
-    IO1_2: IO1Pin<QUADSPI>,
-    IO2_2: IO2Pin<QUADSPI>,
-    IO3_2: IO3Pin<QUADSPI>,
+) -> QSPIStorage
+where
+    M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static,
+    R: embedded_hal::digital::v2::OutputPin + 'static,
+    CLK: ClkPin<QUADSPI> + 'static,
+    NCS1: NCSPin<QUADSPI> + 'static,
+    IO0_1: IO0Pin<QUADSPI> + 'static,
+    IO1_1: IO1Pin<QUADSPI> + 'static,
+    IO2_1: IO2Pin<QUADSPI> + 'static,
+    IO3_1: IO3Pin<QUADSPI> + 'static,
+    NCS2: NCSPin<QUADSPI> + 'static,
+    IO0_2: IO0Pin<QUADSPI> + 'static,
+    IO1_2: IO1Pin<QUADSPI> + 'static,
+    IO2_2: IO2Pin<QUADSPI> + 'static,
+    IO3_2: IO3Pin<QUADSPI> + 'static,
 {
     flash_reset_pin.set_low().ok();
     cortex_m::asm::delay(clocks.sysclk().0 / 100); // ~10ms delay
@@ -296,15 +300,15 @@ pub fn init_storage<R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2
                         clk_ret, ncs1, io0_1, io1_1, io2_1, io3_1, ncs2, io0_2, io1_2, io2_2, io3_2,
                     );
 
-                    let _qspi_dual = qspi_stm32lx3::qspi::Qspi::new_dual(
+                    let qspi_dual = qspi_stm32lx3::qspi::Qspi::new_dual(
                         qspi_dual,
                         pins_dual,
                         unsafe { core::mem::transmute(&mut rcc.ahb3) },
                         qspi_stm32lx3::qspi::QspiConfig::default(),
                     );
 
-                    // TODO: Инициализировать драйвер хранилища в dual-режиме
-                    defmt::info!("Dual-channel QSPI driver initialized");
+                    QSPIStorage::new::<_, M>(qspi_dual, id_ch1, true, clocks.sysclk())
+                        .expect("Failed to initialize dual-channel QSPI driver")
                 } else {
                     defmt::panic!(
                         "JDEC ID mismatch! Bank1: {}, Bank2: {} - possible PCB/assembly issue",
@@ -313,14 +317,21 @@ pub fn init_storage<R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2
                     );
                 }
             }
-            (Ok(_), Err(_)) => {
+            (Ok(id_ch1), Err(_)) => {
                 defmt::warn!("Bank 2 detection failed. Using single-channel Bank 1 driver.");
 
                 // Освободить пины ch2_probe
-                let (_qspi_ret, _pins_ch2) = qspi_ch2_probe.destroy();
+                let (qspi, (clk_pin, _, _, _, _, _)) = qspi_ch2_probe.destroy();
 
-                // TODO: Инициализировать драйвер хранилища для Bank1
-                defmt::info!("Single-channel QSPI driver (Bank 1 only) initialized");
+                let qspi_ch1 = qspi_stm32lx3::qspi::Qspi::new_bank1(
+                    qspi,
+                    (clk_pin, ncs1, io0_1, io1_1, io2_1, io3_1),
+                    unsafe { core::mem::transmute(&mut rcc.ahb3) },
+                    qspi_stm32lx3::qspi::QspiConfig::default(),
+                );
+
+                QSPIStorage::new::<_, M>(qspi_ch1, id_ch1, false, clocks.sysclk())
+                    .expect("Failed to initialize dual-channel QSPI driver")
             }
             // Остальные комбинации невозможны, т.к. id1 = Ok по условию выше
             _ => unreachable!(),
@@ -335,18 +346,16 @@ pub fn init_storage<R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2
         );
 
         let id2 = stm32_usb_self_writer::qspi_storage::probe(&mut qspi_ch2, clocks.sysclk());
-        match &id2 {
+        match id2 {
             Ok(id) => {
                 defmt::info!("QSPI flash bank 2 detected, {}", defmt::Debug2Format(&id));
 
-                // TODO: Инициализировать драйвер хранилища для Bank2
-                defmt::info!("Single-channel QSPI driver (Bank 2 only) initialized");
+                QSPIStorage::new::<_, M>(qspi_ch2, id, false, clocks.sysclk())
+                    .expect("Failed to initialize dual-channel QSPI driver")
             }
             Err(_) => {
                 defmt::panic!("No QSPI flash detected on any bank!");
             }
         }
-
-        let (_qspi_ret, _pins_ch2_ret) = qspi_ch2.destroy();
     }
 }

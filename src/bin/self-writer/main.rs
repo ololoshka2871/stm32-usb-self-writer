@@ -273,7 +273,7 @@ mod app {
                     .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
             );
 
-            init_storage(
+            let _storage = init_storage::<Mono, _, _, _, _, _, _, _, _, _, _, _, _>(
                 unsafe { qspi_stm32lx3::stm32l4x3::QUADSPI::new() },
                 flash_reset_pin,
                 clk_pin,
@@ -679,7 +679,7 @@ mod app {
             let res = (&mut usb_dev, &mut scsi, &mut serial)
                 .lock(|usb_dev, scsi, serial| usb_dev.poll(&mut [scsi, serial]));
 
-            if res {
+            if res && !protobuf_input_tx.is_full() {
                 while let Ok(data) = serial.lock(|serial| {
                     let mut buf = [0u8; config::BULK_MAX_PACKET_SIZE];
                     serial.read_packet(&mut buf).map(|len| buf[..len].to_vec())

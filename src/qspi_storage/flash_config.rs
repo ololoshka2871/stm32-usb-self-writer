@@ -32,24 +32,22 @@ pub struct FlashConfig {
 }
 
 impl FlashConfig {
-    pub fn capacity(&self) -> usize {
-        2usize.pow(self.qspi_flash_size_code as u32 + 1)
+    pub fn capacity(&self, dual: bool) -> usize {
+        // +1 because code is 0-based, +1 for dual mode
+        2usize.pow(self.qspi_flash_size_code as u32 + 1 + dual as u32)
     }
 
     pub fn configure(
         &self,
         driver: &mut dyn FlashDriver,
+        dual: bool,
         qspi_base_clock_speed: Hertz,
     ) -> Result<(), QspiError> {
         fn call_if_not_none(
             driver: &mut dyn FlashDriver,
             f: Option<fn(driver: &mut dyn FlashDriver) -> Result<(), QspiError>>,
         ) -> Result<(), QspiError> {
-            if let Some(f) = f {
-                f(driver)
-            } else {
-                Ok(())
-            }
+            if let Some(f) = f { f(driver) } else { Ok(()) }
         }
 
         call_if_not_none(driver, self.flash_prepare_qspi)?;
@@ -60,7 +58,13 @@ impl FlashConfig {
                 (qspi_base_clock_speed.0 / self.qspi_max_freq.0) as u8,
             ))
             .clock_mode(qspi_stm32lx3::qspi::ClockMode::Mode3)
-            .flash_size(core::cmp::min(self.qspi_flash_size_code, 23))
+            .flash_size({
+                let mut size = core::cmp::min(self.qspi_flash_size_code, 23);
+                if dual {
+                    size += 1; // double the flash size for dual mode
+                }
+                size
+            })
             .address_size(self.address_size)
             .chip_select_high_time(
                 core::cmp::min((qspi_base_clock_speed.0 / 10_000_000) as u8, 8), // max 8
@@ -82,7 +86,7 @@ impl defmt::Format for FlashConfig {
             fmt,
             "Vendor: {}, capacity {} bytes",
             self.vendor_name,
-            self.capacity()
+            self.capacity(false)
         )
     }
 }
