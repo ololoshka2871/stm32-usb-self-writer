@@ -163,7 +163,7 @@ pub fn probe(
     qspi: &mut dyn IQspi,
     sys_clk: stm32l4xx_hal::time::Hertz,
 ) -> Result<Identification, QspiError> {
-    let config = qspi_stm32lx3::qspi::QspiConfig::default()
+    let config = qspi_stm32lx3::QspiConfig::default()
         /* failsafe config */
         .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
         .clock_mode(qspi_stm32lx3::qspi::ClockMode::Mode3);

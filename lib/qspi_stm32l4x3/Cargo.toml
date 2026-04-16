@@ -2,7 +2,7 @@
 authors = ["ololoshka2871"]
 edition = "2018"
 name = "qspi-stm32lx3"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
 vcell = "0.1.3"

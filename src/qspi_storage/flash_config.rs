@@ -1,7 +1,10 @@
-use qspi_stm32lx3::qspi::{AddressSize, QspiError};
+use qspi_stm32lx3::{
+    QspiConfig,
+    qspi::{AddressSize, QspiError},
+};
 use stm32l4xx_hal::time::Hertz;
 
-use super::qspi_driver::{FlashDriver, QspiConfig};
+use super::qspi_driver::FlashDriver;
 
 #[allow(non_snake_case)]
 mod MT25QU01GBBB8E12;

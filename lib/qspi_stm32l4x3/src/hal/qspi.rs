@@ -1,7 +1,7 @@
 //! Quad Serial Peripheral Interface (QSPI) bus for L4x3
+use stm32l4xx_hal as hal;
 
 use super::iqspi::IQspi;
-use stm32l4xx_hal as hal;
 
 // Пины для L4x3 для QSPI
 #[cfg(feature = "stm32l443")]
@@ -13,9 +13,19 @@ use hal::gpio::{
     gpioe::{PE10, PE11, PE12, PE13, PE14, PE15},
 };
 
-use crate::hal::rcc::{Enable, AHB3};
 use crate::stm32l4x3::QUADSPI;
-use core::ptr;
+use crate::{
+    hal::rcc::{Enable, AHB3},
+    QspiConfig,
+};
+
+use core::{
+    cell::{Cell, UnsafeCell},
+    marker::PhantomData,
+    ptr,
+};
+use cortex_m::interrupt::Mutex;
+
 use hal::gpio::{Alternate, PushPull, Speed};
 
 #[doc(hidden)]
@@ -46,6 +56,150 @@ pub trait IO2Pin<QSPI>: private::Sealed {
 /// IO3 pin. This trait is sealed and cannot be implemented.
 pub trait IO3Pin<QSPI>: private::Sealed {
     fn set_speed(self, speed: Speed) -> Self;
+}
+
+pub trait IntoVirtualClk: private::Sealed + Sized {
+    type RealClk;
+
+    fn virtual_clk(&self) -> VirtualClk<Self::RealClk>;
+}
+
+pub struct VirtualClk<CLK> {
+    _marker: PhantomData<CLK>,
+}
+
+impl<CLK> VirtualClk<CLK> {
+    fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<CLK> private::Sealed for VirtualClk<CLK> {}
+
+impl<CLK> ClkPin<QUADSPI> for VirtualClk<CLK>
+where
+    CLK: ClkPin<QUADSPI>,
+{
+    fn set_speed(self, _speed: Speed) -> Self {
+        self
+    }
+}
+
+impl<CLK> IntoVirtualClk for CLK
+where
+    CLK: ClkPin<QUADSPI>,
+{
+    type RealClk = CLK;
+
+    fn virtual_clk(&self) -> VirtualClk<Self::RealClk> {
+        VirtualClk::new()
+    }
+}
+
+pub trait QspiRegisterAccess {
+    fn with_qspi<R>(&self, action: impl FnOnce(&QUADSPI) -> R) -> R;
+    fn with_qspi_mut<R>(&self, action: impl FnOnce(&mut QUADSPI) -> R) -> R;
+}
+
+pub struct SharedQUADSPI {
+    lock_flag: Mutex<Cell<bool>>,
+    qspi: UnsafeCell<QUADSPI>,
+}
+
+pub struct SharedQUADSPILock<'a> {
+    shared: &'a SharedQUADSPI,
+}
+
+impl SharedQUADSPI {
+    pub fn new(qspi: QUADSPI, ahb3: &mut AHB3) -> Self {
+        QUADSPI::enable(ahb3);
+
+        qspi.cr.modify(|_, w| w.en().clear_bit());
+        qspi.fcr.write(|w| {
+            w.ctof()
+                .set_bit()
+                .csmf()
+                .set_bit()
+                .ctcf()
+                .set_bit()
+                .ctef()
+                .set_bit()
+        });
+
+        Self {
+            lock_flag: Mutex::new(Cell::new(false)),
+            qspi: UnsafeCell::new(qspi),
+        }
+    }
+
+    fn try_acquire(&self) -> bool {
+        cortex_m::interrupt::free(|cs| {
+            let flag = self.lock_flag.borrow(cs);
+            if flag.get() {
+                false
+            } else {
+                flag.set(true);
+                true
+            }
+        })
+    }
+
+    fn release(&self) {
+        cortex_m::interrupt::free(|cs| {
+            self.lock_flag.borrow(cs).set(false);
+        });
+    }
+
+    pub fn lock(&self) -> SharedQUADSPILock<'_> {
+        while !self.try_acquire() {
+            cortex_m::asm::nop();
+        }
+        SharedQUADSPILock { shared: self }
+    }
+}
+
+unsafe impl Sync for SharedQUADSPI {}
+
+impl Drop for SharedQUADSPILock<'_> {
+    fn drop(&mut self) {
+        self.shared.release();
+    }
+}
+
+impl QspiRegisterAccess for SharedQUADSPI {
+    fn with_qspi<R>(&self, action: impl FnOnce(&QUADSPI) -> R) -> R {
+        let guard = self.lock();
+        guard.with_qspi(action)
+    }
+
+    fn with_qspi_mut<R>(&self, action: impl FnOnce(&mut QUADSPI) -> R) -> R {
+        let guard = self.lock();
+        guard.with_qspi_mut(action)
+    }
+}
+
+impl<'a> QspiRegisterAccess for SharedQUADSPILock<'a> {
+    fn with_qspi<R>(&self, action: impl FnOnce(&QUADSPI) -> R) -> R {
+        unsafe { action(&*self.shared.qspi.get()) }
+    }
+
+    fn with_qspi_mut<R>(&self, action: impl FnOnce(&mut QUADSPI) -> R) -> R {
+        unsafe { action(&mut *self.shared.qspi.get()) }
+    }
+}
+
+/// &SharedQUADSPI is also a valid access token — allows two channels
+/// to borrow the same SharedQUADSPI simultaneously.
+impl<'a> QspiRegisterAccess for &'a SharedQUADSPI {
+    fn with_qspi<R>(&self, action: impl FnOnce(&QUADSPI) -> R) -> R {
+        (*self).with_qspi(action)
+    }
+
+    fn with_qspi_mut<R>(&self, action: impl FnOnce(&mut QUADSPI) -> R) -> R {
+        (*self).with_qspi_mut(action)
+    }
 }
 
 macro_rules! pins {
@@ -160,82 +314,6 @@ impl FlashBank {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct QspiConfig {
-    /// This field defines the scaler factor for generating CLK based on the AHB clock
-    /// (value+1).
-    clock_prescaler: u8,
-    /// Number of bytes in Flash memory = 2^[FSIZE+1]
-    flash_size: u8,
-    address_size: AddressSize,
-    /// This bit indicates the level that CLK takes between commands Mode 0(low) / mode 3(high)
-    clock_mode: ClockMode,
-    /// FIFO threshold level (Activates FTF, QUADSPI_SR[2]) 0-15.
-    fifo_threshold: u8,
-    sample_shift: SampleShift,
-    /// CSHT+1 defines the minimum number of CLK cycles which the chip select (nCS) must
-    /// remain high between commands issued to the Flash memory.
-    chip_select_high_time: u8,
-    qpi_mode: bool,
-}
-
-impl Default for QspiConfig {
-    fn default() -> QspiConfig {
-        QspiConfig {
-            clock_prescaler: 0,
-            flash_size: 22, // 8MB // 26 = 128MB
-            address_size: AddressSize::Addr24Bit,
-            clock_mode: ClockMode::Mode0,
-            fifo_threshold: 1,
-            sample_shift: SampleShift::HalfACycle,
-            chip_select_high_time: 1,
-            qpi_mode: false,
-        }
-    }
-}
-
-impl QspiConfig {
-    pub fn clock_prescaler(mut self, clk_pre: u8) -> Self {
-        self.clock_prescaler = clk_pre;
-        self
-    }
-
-    pub fn flash_size(mut self, fl_size: u8) -> Self {
-        self.flash_size = fl_size;
-        self
-    }
-
-    pub fn address_size(mut self, add_size: AddressSize) -> Self {
-        self.address_size = add_size;
-        self
-    }
-
-    pub fn clock_mode(mut self, clk_mode: ClockMode) -> Self {
-        self.clock_mode = clk_mode;
-        self
-    }
-
-    pub fn fifo_threshold(mut self, fifo_thres: u8) -> Self {
-        self.fifo_threshold = fifo_thres;
-        self
-    }
-
-    pub fn sample_shift(mut self, shift: SampleShift) -> Self {
-        self.sample_shift = shift;
-        self
-    }
-
-    pub fn chip_select_high_time(mut self, csht: u8) -> Self {
-        self.chip_select_high_time = csht;
-        self
-    }
-
-    pub fn qpi_mode(mut self, qpi: bool) -> Self {
-        self.qpi_mode = qpi;
-        self
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct QspiWriteCommand<'a> {
     pub instruction: Option<(u8, QspiMode)>,
     pub address: Option<(u32, QspiMode)>,
@@ -324,8 +402,7 @@ pub struct Qspi<PINS> {
     flash_bank: FlashBank,
 }
 
-impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)>
-{
+impl<CLK, NCS, IO0, IO1, IO2, IO3> Qspi<(CLK, NCS, IO0, IO1, IO2, IO3)> {
     pub fn new_bank1(
         qspi: QUADSPI,
         pins: (CLK, NCS, IO0, IO1, IO2, IO3),
@@ -1030,7 +1107,7 @@ impl<CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2>
     }
 }
 
-trait QspiPins {
+pub trait QspiPins {
     fn set_very_high_speed(self) -> Self;
 }
 

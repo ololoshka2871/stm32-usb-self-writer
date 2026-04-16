@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "qspi-stm32lx3"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cortex-m 0.7.7",
  "stm32l4xx-hal",

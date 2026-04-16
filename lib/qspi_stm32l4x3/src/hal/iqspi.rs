@@ -1,4 +1,7 @@
-use crate::qspi::{QspiConfig, QspiError, QspiReadCommand, QspiWriteCommand};
+use crate::{
+    hal::QspiConfig,
+    qspi::{QspiError, QspiReadCommand, QspiWriteCommand},
+};
 
 pub trait IQspi {
     fn fmode(&self) -> u8;

@@ -1,14 +1,13 @@
 use core::cell::RefCell;
 
 use alloc::{boxed::Box, sync::Arc};
-use qspi_stm32lx3::{iqspi::IQspi, qspi::QspiWriteCommand};
+use qspi_stm32lx3::{QspiConfig, iqspi::IQspi, qspi::QspiWriteCommand};
 
 #[cfg(feature = "stm32l433")]
 pub use qspi_stm32lx3::{qspi, stm32l4x3::QUADSPI};
 
 pub use qspi::{
-    ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin, Qspi, QspiConfig, QspiError, QspiMode,
-    QspiReadCommand,
+    ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin, Qspi, QspiError, QspiMode, QspiReadCommand,
 };
 use rtic_monotonics::Monotonic;
 

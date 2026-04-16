@@ -1,10 +1,9 @@
 use qspi_stm32lx3::{
-    qspi::{ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, NCSPin},
+    qspi::{ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, IntoVirtualClk, NCSPin, SharedQUADSPI},
+    qspi_shared_channel::QspiSharedChannel,
     stm32l4x3::QUADSPI,
 };
-use stm32_usb_self_writer::{
-    config, qspi_storage::QSPIStorage, sensors::analog::AnalogSensor, settings,
-};
+use stm32_usb_self_writer::{config, sensors::analog::AnalogSensor, settings};
 use stm32l4xx_hal::{
     adc,
     crc::CrcExt,
@@ -212,7 +211,8 @@ pub fn init_storage<M, R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO
     pins_ch2: (NCS2, IO0_2, IO1_2, IO2_2, IO3_2),
     rcc: &mut rcc::Rcc,
     clocks: &Clocks,
-) -> QSPIStorage
+)
+/* -> QSPIStorage*/
 where
     M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static,
     R: embedded_hal::digital::v2::OutputPin + 'static,
@@ -232,19 +232,35 @@ where
     cortex_m::asm::delay(clocks.sysclk().0 / 100); // ~10ms delay
     flash_reset_pin.set_high().ok();
 
-    let mut qspi_ch1 = qspi_stm32lx3::qspi::Qspi::new_bank1(
-        qspi,
+    let shared_qspi = SharedQUADSPI::new(qspi, unsafe { core::mem::transmute(&mut rcc.ahb3) });
+
+    let clk_virtual = clk_pin.virtual_clk();
+
+    let mut qspi_ch1 = QspiSharedChannel::new_bank1(
+        &shared_qspi,
         (
             clk_pin, pins_ch1.0, pins_ch1.1, pins_ch1.2, pins_ch1.3, pins_ch1.4,
         ),
-        unsafe { core::mem::transmute(&mut rcc.ahb3) },
-        qspi_stm32lx3::qspi::QspiConfig::default(),
+        qspi_stm32lx3::QspiConfig::default(),
+    );
+
+    let mut qspi_ch2 = QspiSharedChannel::new_bank2(
+        &shared_qspi,
+        (
+            clk_virtual,
+            pins_ch2.0,
+            pins_ch2.1,
+            pins_ch2.2,
+            pins_ch2.3,
+            pins_ch2.4,
+        ),
+        qspi_stm32lx3::QspiConfig::default(),
     );
 
     let id1 = stm32_usb_self_writer::qspi_storage::probe(&mut qspi_ch1, clocks.sysclk());
     match &id1 {
         Ok(id) => {
-            defmt::info!("QSPI flash bank 1 detected, {}", defmt::Debug2Format(&id));
+            defmt::debug!("QSPI flash bank 1 detected, {}", defmt::Debug2Format(&id));
         }
         Err(e) => {
             defmt::warn!(
@@ -254,108 +270,48 @@ where
         }
     }
 
-    let (qspi, (clk, ncs1, io0_1, io1_1, io2_1, io3_1)) = qspi_ch1.destroy();
-    let (ncs2_ch, io0_2_ch, io1_2_ch, io2_2_ch, io3_2_ch) = pins_ch2;
+    let id2 = stm32_usb_self_writer::qspi_storage::probe(&mut qspi_ch2, clocks.sysclk());
+    match &id2 {
+        Ok(id) => {
+            defmt::debug!("QSPI flash bank 2 detected, {}", defmt::Debug2Format(&id));
+        }
+        Err(e) => {
+            defmt::warn!(
+                "QSPI flash bank 2 not detected: {}",
+                defmt::Debug2Format(&e)
+            );
+        }
+    }
 
-    // Проверить id1; если ошибка - создаем ch2 только для проверки
-    if id1.is_ok() {
-        // Bank1 работает - попытаться создать ch2 для dual-режима
+    match (id1, id2) {
+        (Ok(id_ch1), Ok(id_ch2)) => {
+            if id_ch1 == id_ch2 {
+                defmt::info!(
+                    "Both banks detected via SharedQUADSPI (independent channels), matching IDs: {}",
+                    defmt::Debug2Format(&id_ch1)
+                );
 
-        // Для проверки ch2: используем QUADSPI в bank2 режиме
-        let mut qspi_ch2_probe = qspi_stm32lx3::qspi::Qspi::new_bank2(
-            qspi,
-            (clk, ncs2_ch, io0_2_ch, io1_2_ch, io2_2_ch, io3_2_ch),
-            unsafe { core::mem::transmute(&mut rcc.ahb3) },
-            qspi_stm32lx3::qspi::QspiConfig::default(),
-        );
-
-        let id2 = stm32_usb_self_writer::qspi_storage::probe(&mut qspi_ch2_probe, clocks.sysclk());
-        match &id2 {
-            Ok(id) => {
-                defmt::info!("QSPI flash bank 2 detected, {}", defmt::Debug2Format(&id));
-            }
-            Err(e) => {
-                defmt::warn!(
-                    "QSPI flash bank 2 not detected: {}",
-                    defmt::Debug2Format(&e)
+                // QSPIStorage integration is intentionally disabled for now.
+                // Example future direction:
+                // let storage = QSPIStorage::new_shared(ch1, ch2, id_ch1, clocks.sysclk())?;
+            } else {
+                defmt::panic!(
+                    "JDEC ID mismatch! Bank1: {}, Bank2: {} - possible PCB/assembly issue",
+                    defmt::Debug2Format(&id_ch1),
+                    defmt::Debug2Format(&id_ch2)
                 );
             }
         }
-
-        // Принять решение на основе результатов проб
-        match (id1, id2) {
-            (Ok(id_ch1), Ok(id_ch2)) => {
-                // Оба канала работают - проверить совпадение IDs
-                if id_ch1 == id_ch2 {
-                    defmt::info!(
-                        "Both banks detected with matching IDs. Creating dual-channel driver."
-                    );
-
-                    // Получить пины обратно из ch2_probe
-                    let (qspi_dual, (clk_ret, ncs2, io0_2, io1_2, io2_2, io3_2)) =
-                        qspi_ch2_probe.destroy();
-
-                    // Создать dual-режим драйвер
-                    let pins_dual = (
-                        clk_ret, ncs1, io0_1, io1_1, io2_1, io3_1, ncs2, io0_2, io1_2, io2_2, io3_2,
-                    );
-
-                    let qspi_dual = qspi_stm32lx3::qspi::Qspi::new_dual(
-                        qspi_dual,
-                        pins_dual,
-                        unsafe { core::mem::transmute(&mut rcc.ahb3) },
-                        qspi_stm32lx3::qspi::QspiConfig::default(),
-                    );
-
-                    QSPIStorage::new::<_, M>(qspi_dual, id_ch1, true, clocks.sysclk())
-                        .expect("Failed to initialize dual-channel QSPI driver")
-                } else {
-                    defmt::panic!(
-                        "JDEC ID mismatch! Bank1: {}, Bank2: {} - possible PCB/assembly issue",
-                        defmt::Debug2Format(&id_ch1),
-                        defmt::Debug2Format(&id_ch2)
-                    );
-                }
-            }
-            (Ok(id_ch1), Err(_)) => {
-                defmt::warn!("Bank 2 detection failed. Using single-channel Bank 1 driver.");
-
-                // Освободить пины ch2_probe
-                let (qspi, (clk_pin, _, _, _, _, _)) = qspi_ch2_probe.destroy();
-
-                let qspi_ch1 = qspi_stm32lx3::qspi::Qspi::new_bank1(
-                    qspi,
-                    (clk_pin, ncs1, io0_1, io1_1, io2_1, io3_1),
-                    unsafe { core::mem::transmute(&mut rcc.ahb3) },
-                    qspi_stm32lx3::qspi::QspiConfig::default(),
-                );
-
-                QSPIStorage::new::<_, M>(qspi_ch1, id_ch1, false, clocks.sysclk())
-                    .expect("Failed to initialize dual-channel QSPI driver")
-            }
-            // Остальные комбинации невозможны, т.к. id1 = Ok по условию выше
-            _ => unreachable!(),
+        (Ok(_), Err(_)) => {
+            defmt::warn!("Only Bank1 responded in SharedQUADSPI mode");
+            // QSPIStorage integration is intentionally disabled for now.
         }
-    } else {
-        // Bank1 не работает - попытаться ch2
-        let mut qspi_ch2 = qspi_stm32lx3::qspi::Qspi::new_bank2(
-            qspi,
-            (clk, ncs2_ch, io0_2_ch, io1_2_ch, io2_2_ch, io3_2_ch),
-            unsafe { core::mem::transmute(&mut rcc.ahb3) },
-            qspi_stm32lx3::qspi::QspiConfig::default(),
-        );
-
-        let id2 = stm32_usb_self_writer::qspi_storage::probe(&mut qspi_ch2, clocks.sysclk());
-        match id2 {
-            Ok(id) => {
-                defmt::info!("QSPI flash bank 2 detected, {}", defmt::Debug2Format(&id));
-
-                QSPIStorage::new::<_, M>(qspi_ch2, id, false, clocks.sysclk())
-                    .expect("Failed to initialize dual-channel QSPI driver")
-            }
-            Err(_) => {
-                defmt::panic!("No QSPI flash detected on any bank!");
-            }
+        (Err(_), Ok(_)) => {
+            defmt::warn!("Only Bank2 responded in SharedQUADSPI mode");
+            // QSPIStorage integration is intentionally disabled for now.
+        }
+        (Err(_), Err(_)) => {
+            defmt::panic!("No QSPI flash detected on any bank!");
         }
     }
 }
