@@ -5,6 +5,7 @@ use alloc::{boxed::Box, vec::Vec};
 use rtic_sync::channel::{NoReceiver, ReceiveError, Receiver, Sender};
 
 use stm32_usb_self_writer::{
+    main_data_storage::StorageMetaHandle,
     protobuf::{self, AsyncStream},
     settings,
     workmodes::output_storage::OutputStorage,
@@ -70,6 +71,7 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     with_settings: &mut impl FnMut(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
+    storage_meta: StorageMetaHandle,
 ) -> Result<bool, protobuf::ProtobufProcessError<IE, NoReceiver<Vec<u8>>>> {
     let request = {
         let msg_size = protobuf::recive_md_header_async(input_stream).await?;
@@ -79,8 +81,13 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     };
 
     let mut response = protobuf::new_response(request.id, timestamp_getter());
-    let need_to_write =
-        protobuf::process_request(&request, &mut response, output_getter, with_settings);
+    let need_to_write = protobuf::process_request(
+        &request,
+        &mut response,
+        output_getter,
+        with_settings,
+        storage_meta,
+    );
 
     {
         defmt::trace!("Protobuf response: {}", defmt::Debug2Format(&response));

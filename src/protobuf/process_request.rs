@@ -1,4 +1,8 @@
-use crate::{settings, workmodes::output_storage::OutputStorage};
+use crate::{
+    main_data_storage::StorageMetaHandle,
+    settings,
+    workmodes::output_storage::OutputStorage,
+};
 
 const PROTOCOL_VERSION: u32 = super::messages::Info::ProtocolVersion as u32;
 
@@ -9,6 +13,7 @@ pub fn process_request(
     with_settings: &mut impl FnMut(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
+    storage_meta: StorageMetaHandle,
 ) -> bool {
     if !(req.device_id == super::messages::Info::PressureSelfWriterId as u32
         || req.device_id == super::messages::Info::IdDiscover as u32)
@@ -85,17 +90,28 @@ pub fn process_request(
                 Some(false)
             }
         }
-        // TODO:
-        //if let Some(clear_memory) = flash_command.clear_memory {
-        //    if clear_memory {
-        //        defmt::warn!("Start clearing memory!");
-        //        if let Err(e) = crate::main_data_storage::flash_erease() {
-        //            defmt::error!("Failed to start clear memory: {}", defmt::Debug2Format(&e));
-        //            resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
-        //        }
-        //    }
-        //}
-        fill_flash_state(&mut flash_status, reset_monitoring_failed);
+
+        let mut clear_memory_requested = false;
+        if let Some(true) = flash_command.clear_memory {
+            defmt::warn!("Start clearing memory!");
+            match storage_meta.request_erase() {
+                Ok(()) => clear_memory_requested = true,
+                Err(e) => {
+                    defmt::error!(
+                        "Failed to start clear memory: {}",
+                        defmt::Debug2Format(&e)
+                    );
+                    resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
+                }
+            }
+        }
+
+        fill_flash_state(
+            &mut flash_status,
+            storage_meta,
+            reset_monitoring_failed,
+            clear_memory_requested,
+        );
 
         resp.flash_status = Some(flash_status);
     }
@@ -112,17 +128,18 @@ pub fn process_request(
 
 fn fill_flash_state(
     flash_status: &mut super::messages::FlashStatus,
+    storage_meta: StorageMetaHandle,
     reset_monitoring_failed: Option<bool>,
+    clear_memory_requested: bool,
 ) {
-    flash_status.flash_page_size = 0;
-    // TODO:
-    // crate::main_data_storage::flash_page_size();
+    flash_status.flash_page_size = storage_meta.block_size_bytes();
+    flash_status.flash_pages = storage_meta.total_blocks();
+    flash_status.flash_used_pages = storage_meta.used_blocks();
 
     flash_status.status = if let Some(true) = reset_monitoring_failed {
         super::messages::flash_status::Status::ResetMonitoringFailed
-    // TODO:
-    //} else if crate::main_data_storage::is_erase_in_progress() {
-    //    super::messages::flash_status::Status::Ereasing
+    } else if clear_memory_requested || storage_meta.erase_in_progress() {
+        super::messages::flash_status::Status::Ereasing
     } else {
         super::messages::flash_status::Status::Ok
     } as i32;

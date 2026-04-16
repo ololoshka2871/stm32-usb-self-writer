@@ -1,8 +1,10 @@
+use alloc::boxed::Box;
 use qspi_stm32lx3::{
     qspi::{ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, IntoVirtualClk, NCSPin, SharedQUADSPI},
     qspi_shared_channel::QspiSharedChannel,
     stm32l4x3::QUADSPI,
 };
+use stm32_usb_self_writer::main_data_storage::StorageMetaHandle;
 use stm32_usb_self_writer::{config, sensors::analog::AnalogSensor, settings};
 use stm32l4xx_hal::{
     adc,
@@ -211,7 +213,7 @@ pub fn init_storage<M, R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO
     pins_ch2: (NCS2, IO0_2, IO1_2, IO2_2, IO3_2),
     rcc: &mut rcc::Rcc,
     clocks: &Clocks,
-)
+) -> StorageMetaHandle
 /* -> QSPIStorage*/
 where
     M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static,
@@ -232,12 +234,15 @@ where
     cortex_m::asm::delay(clocks.sysclk().0 / 100); // ~10ms delay
     flash_reset_pin.set_high().ok();
 
-    let shared_qspi = SharedQUADSPI::new(qspi, unsafe { core::mem::transmute(&mut rcc.ahb3) });
+    let shared_qspi: &'static SharedQUADSPI = Box::leak(Box::new(SharedQUADSPI::new(
+        qspi,
+        unsafe { core::mem::transmute(&mut rcc.ahb3) },
+    )));
 
     let clk_virtual = clk_pin.virtual_clk();
 
     let mut qspi_ch1 = QspiSharedChannel::new_bank1(
-        &shared_qspi,
+        shared_qspi,
         (
             clk_pin, pins_ch1.0, pins_ch1.1, pins_ch1.2, pins_ch1.3, pins_ch1.4,
         ),
@@ -245,7 +250,7 @@ where
     );
 
     let mut qspi_ch2 = QspiSharedChannel::new_bank2(
-        &shared_qspi,
+        shared_qspi,
         (
             clk_virtual,
             pins_ch2.0,
@@ -291,9 +296,12 @@ where
                     defmt::Debug2Format(&id_ch1)
                 );
 
-                // QSPIStorage integration is intentionally disabled for now.
-                // Example future direction:
-                // let storage = QSPIStorage::new_shared(ch1, ch2, id_ch1, clocks.sysclk())?;
+                return stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter_dual::<
+                    M,
+                    _,
+                    _,
+                >(qspi_ch1, id_ch1, qspi_ch2, id_ch2, clocks.sysclk())
+                .expect("Failed to initialize dual shared QSPI storage adapter");
             } else {
                 defmt::panic!(
                     "JDEC ID mismatch! Bank1: {}, Bank2: {} - possible PCB/assembly issue",
@@ -302,13 +310,25 @@ where
                 );
             }
         }
-        (Ok(_), Err(_)) => {
+        (Ok(id_ch1), Err(_)) => {
             defmt::warn!("Only Bank1 responded in SharedQUADSPI mode");
-            // QSPIStorage integration is intentionally disabled for now.
+
+            return stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter::<M, _>(
+                qspi_ch1,
+                id_ch1,
+                clocks.sysclk(),
+            )
+            .expect("Failed to initialize bank1 shared QSPI storage adapter");
         }
-        (Err(_), Ok(_)) => {
+        (Err(_), Ok(id_ch2)) => {
             defmt::warn!("Only Bank2 responded in SharedQUADSPI mode");
-            // QSPIStorage integration is intentionally disabled for now.
+
+            return stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter::<M, _>(
+                qspi_ch2,
+                id_ch2,
+                clocks.sysclk(),
+            )
+            .expect("Failed to initialize bank2 shared QSPI storage adapter");
         }
         (Err(_), Err(_)) => {
             defmt::panic!("No QSPI flash detected on any bank!");

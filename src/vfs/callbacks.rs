@@ -52,6 +52,9 @@ pub(crate) unsafe extern "C" fn unpack_reader(
 
 pub (crate) unsafe extern "C" fn null_read(_dest: *mut u8, _size: i32, _offset: u32, _userdata: usize) {}
 
+pub(crate) const STORAGE_VIEW_RAW: usize = 1;
+pub(crate) const STORAGE_VIEW_USED: usize = 2;
+
 pub(crate) unsafe fn store_block_data(s: String, dest: *mut u8, size: i32, offset: u32) {
     let src = s.as_bytes();
     let offset = offset as usize;
@@ -98,36 +101,40 @@ pub(crate) unsafe extern "C" fn settings_read(
     core::ptr::write_bytes(dest, b' ', size as usize);
 }
 
-//pub(crate) unsafe extern "C" fn meminfo_read(
-//    dest: *mut u8,
-//    size: i32,
-//    offset: u32,
-//    _userdata: usize,
-//) {
-//    use serde::Serialize;
-//
-//    #[allow(non_snake_case)]
-//    #[derive(Serialize)]
-//    struct MemInfo {
-//        FlashPageSize: u32,
-//        FlashPages: u32,
-//        FlashUsedPages: u32,
-//    }
-//
-//    let info = MemInfo {
-//        FlashPageSize: crate::main_data_storage::flash_page_size(),
-//        FlashPages: crate::main_data_storage::flash_size_pages(),
-//        FlashUsedPages: crate::main_data_storage::find_next_empty_page(0).unwrap_or_default(),
-//    };
-//
-//    match serde_json::to_string_pretty(&info) {
-//        Ok(s) => store_block_data(s, dest, size, offset),
-//        Err(e) => defmt::error!(
-//            "Failed to serialise flash info: {}",
-//            defmt::Display2Format(&e)
-//        ),
-//    }
-//}
+pub(crate) unsafe extern "C" fn meminfo_read(
+    dest: *mut u8,
+    size: i32,
+    offset: u32,
+    _userdata: usize,
+) {
+    use serde::Serialize;
+
+    #[allow(non_snake_case)]
+    #[derive(Serialize)]
+    struct MemInfo {
+        BlockSizeBytes: u32,
+        TotalBlocks: u32,
+        UsedBlocks: u32,
+        EraseInProgress: bool,
+    }
+
+    crate::main_data_storage::refresh_runtime_snapshot();
+
+    let info = MemInfo {
+        BlockSizeBytes: crate::main_data_storage::block_size_bytes() as u32,
+        TotalBlocks: crate::main_data_storage::total_blocks(),
+        UsedBlocks: crate::main_data_storage::used_blocks(),
+        EraseInProgress: crate::main_data_storage::is_erase_in_progress(),
+    };
+
+    match serde_json::to_string_pretty(&info) {
+        Ok(s) => store_block_data(s, dest, size, offset),
+        Err(e) => defmt::error!(
+            "Failed to serialise flash info: {}",
+            defmt::Display2Format(&e)
+        ),
+    }
+}
 //
 //pub(crate) unsafe extern "C" fn master_read(
 //    dest: *mut u8,
@@ -144,25 +151,34 @@ pub(crate) unsafe extern "C" fn settings_read(
 //
 //    core::mem::forget(boxed);
 //}
-//
-//pub(crate) unsafe extern "C" fn flash_read(
-//    dest: *mut u8,
-//    size: i32,
-//    offset: u32,
-//    _userdata: usize,
-//) {
-//    use crate::main_data_storage::*;
-//
-//    let page_size = flash_page_size();
-//    if let Ok(page) = select_page(offset / page_size) {
-//        // Устанваливаем хак прямого чтения вместо чтения в буфер
-//        page.map_to_mem((offset % page_size) as usize)
-//            .serialise_ptr(dest, size as usize)
-//        /*
-//        page.read_to(
-//            (offset % page_size) as usize,
-//            core::slice::from_raw_parts_mut(dest, size as usize),
-//        )
-//        */
-//    }
-//}
+
+pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32, userdata: usize) {
+    if size <= 0 {
+        return;
+    }
+
+    let out = core::slice::from_raw_parts_mut(dest, size as usize);
+    out.fill(0);
+
+    crate::main_data_storage::refresh_runtime_snapshot();
+    if crate::main_data_storage::is_erase_in_progress() {
+        return;
+    }
+
+    let is_used_view = userdata == STORAGE_VIEW_USED;
+    let limit = if is_used_view {
+        crate::main_data_storage::used_size_bytes()
+    } else {
+        crate::main_data_storage::raw_size_bytes()
+    };
+
+    let offset = offset as usize;
+    if offset >= limit {
+        return;
+    }
+
+    let readable = core::cmp::min(out.len(), limit - offset);
+    let target = &mut out[..readable];
+
+    let _ = crate::main_data_storage::read_range(offset, target);
+}

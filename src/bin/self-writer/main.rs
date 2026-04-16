@@ -91,6 +91,7 @@ mod app {
     #[local]
     struct Local {
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
+        storage_meta: stm32_usb_self_writer::main_data_storage::StorageMetaHandle,
 
         master_timer: types::MasterCounter,
         f1_power_pin: PD13<Output<PushPull>>,
@@ -224,7 +225,7 @@ mod app {
         );
         defmt::info!("\tFreqmeter 2");
 
-        {
+        let storage_meta = {
             let flash_reset_pin = gpiod
                 .pd11
                 .into_push_pull_output(&mut gpiod.moder, &mut gpiod.otyper);
@@ -273,7 +274,7 @@ mod app {
                     .into_alternate(&mut gpiod.moder, &mut gpiod.otyper, &mut gpiod.afrl),
             );
 
-            let _storage = init_storage::<Mono, _, _, _, _, _, _, _, _, _, _, _, _>(
+            init_storage::<Mono, _, _, _, _, _, _, _, _, _, _, _, _>(
                 unsafe { qspi_stm32lx3::stm32l4x3::QUADSPI::new() },
                 flash_reset_pin,
                 clk_pin,
@@ -281,8 +282,8 @@ mod app {
                 pins_ch2,
                 &mut rcc,
                 &clocks,
-            );
-        }
+            )
+        };
 
         let (usb_dev, scsi, serial) = init_usb(
             fast_mode,
@@ -369,6 +370,7 @@ mod app {
             },
             Local {
                 analog_sens,
+                storage_meta,
                 master_timer,
 
                 f1_power_pin,
@@ -718,12 +720,13 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx], priority = 1)]
+    #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 1)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
         let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
         let protobuf_output_tx = ctx.local.protobuf_output_tx;
+        let storage_meta = *ctx.local.storage_meta;
 
         let mut get_output = move || output_storage.lock(|storage| storage.clone());
         let mut with_settings = move |f: &mut dyn FnMut(
@@ -755,6 +758,7 @@ mod app {
                 || Mono::now().ticks(),
                 &mut get_output,
                 &mut with_settings,
+                storage_meta,
             )
             .await
             {
