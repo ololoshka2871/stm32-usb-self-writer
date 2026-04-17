@@ -1,10 +1,11 @@
 use crate::{
     hal::QspiConfig,
-    qspi::{QspiError, QspiReadCommand, QspiWriteCommand},
+    qspi::{FlashBank, QspiError, QspiReadCommand, QspiWriteCommand},
 };
 
 pub trait IQspi {
-    fn fmode(&self) -> u8;
+    fn bank(&self) -> FlashBank;
+    fn is_memory_mapped(&self) -> bool;
     fn is_busy(&self) -> bool;
     fn abort_transmission(&self);
 

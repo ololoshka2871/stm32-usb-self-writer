@@ -226,7 +226,7 @@ pub fn chip_erase(driver: &mut dyn FlashDriver, qspi_mode: bool) -> Result<(), Q
         let full_adress = (die * DieConfig::DIE_SIZE.bits()) as u32;
 
         driver.write_enable()?;
-        driver.set_addr_extender((full_adress >> 24) as u8)?;
+        driver.set_addr_extender(full_adress >> 24)?;
 
         driver.write_enable()?;
         let erase_cmd = QspiWriteCommand {

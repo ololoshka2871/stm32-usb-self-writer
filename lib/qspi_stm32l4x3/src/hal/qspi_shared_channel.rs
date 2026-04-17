@@ -102,8 +102,18 @@ impl<ACCESS, PINS> IQspi for QspiSharedChannel<ACCESS, PINS>
 where
     ACCESS: QspiRegisterAccess,
 {
-    fn fmode(&self) -> u8 {
-        self.access.with_qspi(|qspi| qspi.ccr.read().fmode().bits())
+    fn bank(&self) -> FlashBank {
+        self.flash_bank
+    }
+
+    fn is_memory_mapped(&self) -> bool {
+        self.access.with_qspi(|qspi| {
+            let cr = qspi.cr.read();
+
+            (cr.fsel().bit() == self.flash_bank.to_bank_bit())
+                && (cr.dfm().bit() == self.flash_bank.is_dual())
+                && (qspi.ccr.read().fmode().bits() == 0b11)
+        })
     }
 
     fn is_busy(&self) -> bool {
@@ -120,6 +130,7 @@ where
     }
 
     fn apply_config(&mut self, config: QspiConfig) {
+        self.config = config;
         self.access.with_qspi(|qspi| {
             if Self::is_busy_raw(qspi) {
                 Self::abort_raw(qspi);
@@ -155,8 +166,6 @@ where
             qspi.cr.modify(|_, w| w.en().set_bit());
             while Self::is_busy_raw(qspi) {}
         });
-
-        self.config = config;
     }
 
     fn transfer(&self, command: QspiReadCommand, buffer: &mut [u8]) -> Result<(), QspiError> {
@@ -433,19 +442,20 @@ where
     }
 
     fn start_memory_mapping(&self, command: QspiWriteCommand) -> Result<(), QspiError> {
+        let bank_info = self.flash_bank;
         self.access.with_qspi(|qspi| {
-            qspi.cr.modify(|_, w| {
-                w.fsel()
-                    .bit(self.flash_bank.to_bank_bit())
-                    .dfm()
-                    .bit(self.flash_bank.is_dual())
-            });
-
-            if Self::is_busy_raw(qspi) {
-                return Err(QspiError::Busy);
-            }
+            //if Self::is_busy_raw(qspi) {
+            //    return Err(QspiError::Busy);
+            //}
 
             qspi.cr.modify(|_, w| w.en().clear_bit());
+            qspi.ccr.modify(|_, w| unsafe { w.fmode().bits(0b01) });
+            qspi.cr.modify(move |_, w| {
+                w.fsel()
+                    .bit(bank_info.to_bank_bit())
+                    .dfm()
+                    .bit(bank_info.is_dual())
+            });
             qspi.fcr.modify(|_, w| w.ctcf().set_bit());
 
             let mut dmode: u8 = 0;

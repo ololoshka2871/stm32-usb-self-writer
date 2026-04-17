@@ -173,6 +173,7 @@ impl BlockDevice for EMfatStorage {
             return Err(BlockDeviceError::NotReady);
         }
 
+        defmt::trace!("SCSI: Get LBA {:#x}", lba);
         unsafe {
             emfat_rust::emfat_read(&mut self.ctx, block.as_mut_ptr(), lba, 1);
         }

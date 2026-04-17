@@ -83,3 +83,7 @@ pub const GEN_COLD_STARTUP_TIME_MS: u32 = 200;
 
 // Задержка перехода флешки с спящий режим при неактивности
 pub const FLASH_AUTO_POWER_DOWN_MS: u32 = 10;
+
+//-----------------------------------------------------------------------------
+
+pub const STORAGE_BLOCK_SIZE_BYTES: u32 = 4096;

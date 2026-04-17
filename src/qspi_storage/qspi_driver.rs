@@ -64,7 +64,7 @@ pub trait FlashDriver: Sync + Send {
     fn config(&self) -> &FlashConfig;
     fn apply_qspi_config(&mut self, cfg: QspiConfig);
     fn set_memory_mapping_mode(&mut self, enable: bool) -> Result<(), QspiError>;
-    fn set_addr_extender(&mut self, extender_value: u8) -> Result<(), QspiError>;
+    fn set_addr_extender(&mut self, extender_value: u32) -> Result<(), QspiError>;
     fn wake_up(&mut self) -> Result<(), QspiError>;
     fn want_sleep(&mut self);
 }
@@ -79,7 +79,7 @@ enum SleepState {
 pub struct QSpiDriver<M> {
     qspi: Box<dyn IQspi>,
     config: &'static FlashConfig,
-    extender_value: u8,
+    extender_value: u32,
     //sleep_timer: Timer,
     sleep_state: SleepState,
     dual: bool,
@@ -137,7 +137,7 @@ impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'sta
     }
 
     fn is_memory_mapped(&self) -> bool {
-        self.qspi.fmode() == 0b11
+        self.qspi.is_memory_mapped()
     }
 
     fn enter_sleep(&mut self) -> Result<(), QspiError> {
@@ -170,10 +170,7 @@ impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'sta
     }
 
     fn cancel_memory_mapping(&mut self) -> Result<(), QspiError> {
-        if self.is_memory_mapped() {
-            self.set_memory_mapping_mode(false)?;
-        }
-        Ok(())
+        self.set_memory_mapping_mode(false)
     }
 }
 
@@ -280,11 +277,11 @@ impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'sta
     }
 
     fn set_memory_mapping_mode(&mut self, enable: bool) -> Result<(), QspiError> {
-        if enable == self.is_memory_mapped() {
-            return Ok(());
-        }
-
         if enable {
+            if enable == self.is_memory_mapped() {
+                return Ok(());
+            }
+
             const DUMMY: [u8; 1] = [0];
             let enable_mapping_cmd = QspiWriteCommand {
                 instruction: Some((Opcode::QIOFastRead as u8, QspiMode::QuadChannel)),
@@ -295,26 +292,27 @@ impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'sta
                 double_data_rate: false,
             };
 
-            self.qspi.start_memory_mapping(enable_mapping_cmd)?;
+            self.qspi.start_memory_mapping(enable_mapping_cmd)
         } else {
             self.qspi.abort_transmission();
+            Ok(())
         }
-
-        Ok(())
     }
 
-    fn set_addr_extender(&mut self, extender_value: u8) -> Result<(), QspiError> {
+    fn set_addr_extender(&mut self, extender_value: u32) -> Result<(), QspiError> {
         if self.extender_value != extender_value {
             self.cancel_memory_mapping()?;
 
-            self.write_enable()?;
-            let data = [extender_value];
+            //self.write_enable()?;
+
+            let ext_size = self.config.address_size;
+            let data = extender_value.to_le_bytes();
             let set_extender_cmd = QspiWriteCommand {
                 instruction: Some((Opcode::WriteAddrExtanderReg as u8, QspiMode::QuadChannel)),
                 address: None,
                 alternative_bytes: None,
                 dummy_cycles: 0, // internal register, no wait
-                data: Some((&data, QspiMode::QuadChannel)),
+                data: Some((&data[..ext_size.bytes()], QspiMode::QuadChannel)),
                 double_data_rate: false,
             };
 

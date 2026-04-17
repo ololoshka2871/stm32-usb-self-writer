@@ -25,7 +25,7 @@ pub struct FlashConfig {
 
     pub chip_erase: fn(driver: &mut dyn FlashDriver, qspi_mode: bool) -> Result<(), QspiError>,
 
-    address_size: AddressSize,
+    pub address_size: AddressSize,
     qspi_flash_size_code: u8, // using 24bit addressing, 16 MB max per page
     qspi_max_freq: Hertz,
 
@@ -80,6 +80,16 @@ impl FlashConfig {
         driver.apply_qspi_config(cfg);
 
         call_if_not_none(driver, self.flash_finalise_config)
+    }
+
+    // split 32-bit adress to (extender, local_adress)
+    pub fn wrap_adress(&self, addr: usize) -> (u32, u32) {
+        match self.address_size {
+            AddressSize::Addr8Bit => (addr as u32 >> 8, addr as u32 & 0x0000_00FF),
+            AddressSize::Addr16Bit => (addr as u32 >> 16, addr as u32 & 0x0000_FFFF),
+            AddressSize::Addr24Bit => (addr as u32 >> 24, addr as u32 & 0x00FF_FFFF),
+            AddressSize::Addr32Bit => (0, addr as u32),
+        }
     }
 }
 

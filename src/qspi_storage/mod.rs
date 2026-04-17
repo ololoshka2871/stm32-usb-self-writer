@@ -2,16 +2,14 @@ pub mod flash_config;
 mod identification;
 pub mod qspi_driver;
 
-use core::cell::RefCell;
+use core::cell::{RefCell, RefMut};
 
 use identification::Identification;
 use qspi_stm32lx3::iqspi::IQspi;
-use qspi_stm32lx3::qspi::Qspi;
 use usbd_scsi::direct_read::DirectReadHack;
 
 use alloc::{boxed::Box, sync::Arc};
 use cortex_m::interrupt::Mutex as InterruptMutex;
-use stm32l4xx_hal::traits::flash;
 
 use qspi_driver::{FlashDriver, QSpiDriver};
 
@@ -21,8 +19,8 @@ use qspi_driver::QspiError;
 
 use crate::config;
 use crate::main_data_storage::{
-    install_meta_handle, install_read_range_fn, BlockMapper, FlashBanks, StorageDriver,
-    StorageError, StorageGeometry, StorageInfo, StorageMetaHandle,
+    BlockMapper, FlashBanks, StorageDriver, StorageError, StorageGeometry, StorageInfo,
+    StorageMetaHandle, install_meta_handle, install_read_range_fn,
 };
 
 type RuntimeDriver = Arc<RefCell<Box<dyn FlashDriver + 'static>>>;
@@ -32,6 +30,25 @@ struct RuntimeReadAdapter {
     primary: RuntimeDriver,
     secondary: Option<RuntimeDriver>,
     mapper: BlockMapper,
+}
+
+impl RuntimeReadAdapter {
+    fn borrow_bank(&self, bank: u8) -> RefMut<'_, Box<dyn FlashDriver + 'static>> {
+        if let Some(secondary) = &self.secondary {
+            match bank {
+                0 => return self.primary.borrow_mut(),
+                1 => return secondary.borrow_mut(),
+                _ => panic!("Invalid bank index {}", bank),
+            }
+        } else {
+            assert_eq!(
+                bank, 0,
+                "Invalid bank index {} for single-bank adapter",
+                bank
+            );
+            self.primary.borrow_mut()
+        }
+    }
 }
 
 struct RuntimeAdapterStore {
@@ -63,7 +80,7 @@ lazy_static::lazy_static! {
     static ref RUNTIME_DRIVER: RuntimeAdapterStore = RuntimeAdapterStore::new();
 }
 
-const QSPI_MEMORY_MAPPED_REGION: *mut u8 = 0x90000000 as *mut u8;
+const QSPI_MEMORY_MAPPED_BASE: usize = 0x9000_0000;
 
 //pub struct QSPIFlashPageAccessor {
 //    driver: Arc<Mutex<Box<dyn FlashDriver + 'static>>>,
@@ -258,14 +275,12 @@ where
 }
 
 fn geometry_from_driver(driver: &RuntimeDriver, banks: FlashBanks) -> StorageGeometry {
-    const BLOCK_SIZE_BYTES: u32 = 4096;
-
     let guard = driver.borrow();
-    let blocks_per_bank = (guard.get_capacity() / BLOCK_SIZE_BYTES as usize) as u32;
+    let blocks_per_bank = (guard.get_capacity() / config::STORAGE_BLOCK_SIZE_BYTES as usize) as u32;
     let write_granularity_bytes = guard.config().write_max_bytes as u32;
 
     StorageGeometry {
-        block_size_bytes: BLOCK_SIZE_BYTES,
+        block_size_bytes: config::STORAGE_BLOCK_SIZE_BYTES,
         write_granularity_bytes,
         blocks_per_bank,
         banks,
@@ -279,31 +294,30 @@ fn read_range_with_driver(
 ) -> Result<(), StorageError> {
     let mut guard = driver.borrow_mut();
 
-        if let Err(e) = guard.wake_up() {
+    if let Err(e) = guard.wake_up() {
+        return Err(map_qspi_error(e));
+    }
+
+    let mut absolute = global_offset;
+    let mut written = 0usize;
+    while written < dest.len() {
+        let (extender, addr) = guard.config().wrap_adress(absolute);
+        let to_segment_end = 0x0100_0000usize - addr as usize;
+        let chunk = core::cmp::min(dest.len() - written, to_segment_end);
+
+        if let Err(e) = guard.set_addr_extender(extender) {
+            return Err(map_qspi_error(e));
+        }
+        if let Err(e) = guard.read_direct(addr, &mut dest[written..written + chunk]) {
             return Err(map_qspi_error(e));
         }
 
-        let mut absolute = global_offset;
-        let mut written = 0usize;
-        while written < dest.len() {
-            let extender = (absolute >> 24) as u8;
-            let addr24 = (absolute & 0x00FF_FFFF) as u32;
-            let to_segment_end = 0x0100_0000usize - addr24 as usize;
-            let chunk = core::cmp::min(dest.len() - written, to_segment_end);
+        written += chunk;
+        absolute += chunk;
+    }
 
-            if let Err(e) = guard.set_addr_extender(extender) {
-                return Err(map_qspi_error(e));
-            }
-            if let Err(e) = guard.read_direct(addr24, &mut dest[written..written + chunk]) {
-                return Err(map_qspi_error(e));
-            }
-
-            written += chunk;
-            absolute += chunk;
-        }
-
-        guard.want_sleep();
-        Ok(())
+    guard.want_sleep();
+    Ok(())
 }
 
 fn read_range_via_adapter(
@@ -326,7 +340,10 @@ fn read_range_via_adapter(
         let target_driver = if offset_address.bank_index == 0 {
             &adapter.primary
         } else {
-            adapter.secondary.as_ref().ok_or(StorageError::InvalidAddress)?
+            adapter
+                .secondary
+                .as_ref()
+                .ok_or(StorageError::InvalidAddress)?
         };
 
         read_range_with_driver(
@@ -397,10 +414,64 @@ fn map_qspi_error(e: QspiError) -> StorageError {
 }
 
 fn runtime_read_range(global_offset: usize, dest: &mut [u8]) -> Result<(), StorageError> {
-    let adapter = RUNTIME_DRIVER.get_cloned();
+    let adapter: Option<RuntimeReadAdapter> = RUNTIME_DRIVER.get_cloned();
     if let Some(adapter) = adapter {
         read_range_via_adapter(&adapter, global_offset, dest)
     } else {
         Err(StorageError::NotReady)
     }
+}
+
+pub fn runtime_get_mapper() -> Option<BlockMapper> {
+    RUNTIME_DRIVER
+        .get_cloned()
+        .map(|adapter| adapter.mapper.clone())
+}
+
+/// Try to set up memory-mapped mode so flash data at `global_offset` can be read
+/// directly via an AHB pointer (bank1 only). Writes a `DirectReadHack` into `dest`
+/// and returns `true` on success. Returns `false` if the offset maps to bank2 or
+/// the adapter is not installed, in which case the caller must fall back to
+/// `read_range`.
+///
+/// # Safety
+/// `dest` must be valid for `size` bytes of writes.
+pub unsafe fn runtime_try_memory_mapped_hack(
+    global_offset: usize,
+    dest: *mut u8,
+    size: usize,
+) -> Result<(), StorageError> {
+    let adapter = RUNTIME_DRIVER.get_cloned().ok_or(StorageError::NotReady)?;
+
+    // Map logical offset → physical bank + offset
+    let physical = adapter
+        .mapper
+        .map_offset(global_offset)
+        .map_err(|_| StorageError::InvalidAddress)?;
+
+    let local_offset = physical.local_byte_offset;
+
+    let mut guard = adapter.borrow_bank(physical.bank_index);
+    let (extender, addr) = guard.config().wrap_adress(local_offset);
+
+    guard.wake_up().map_err(|_| StorageError::Internal)?;
+    // set_addr_extender cancels memory-mapped mode internally if needed
+    guard
+        .set_addr_extender(extender)
+        .map_err(|_| StorageError::Internal)?;
+    guard
+        .set_memory_mapping_mode(true)
+        .map_err(|_| StorageError::Internal)?;
+
+    let mapped_ptr = (QSPI_MEMORY_MAPPED_BASE + addr as usize) as *const u8;
+    //defmt::debug!(
+    //    "Flash read hacked request: offset={:#x}, size={}, bank={}, mapped_ptr={:?}",
+    //    global_offset,
+    //    size,
+    //    physical.bank_index,
+    //    mapped_ptr
+    //);
+    unsafe { DirectReadHack::new(mapped_ptr).serialise_ptr(dest, size) };
+
+    Ok(())
 }

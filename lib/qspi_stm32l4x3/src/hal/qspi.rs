@@ -274,6 +274,17 @@ pub enum AddressSize {
     Addr32Bit = 0b11,
 }
 
+impl AddressSize {
+    pub fn bytes(self) -> usize {
+        match self {
+            AddressSize::Addr8Bit => 3,
+            AddressSize::Addr16Bit => 2,
+            AddressSize::Addr24Bit => 1,
+            AddressSize::Addr32Bit => 0,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SampleShift {
     None,
@@ -302,10 +313,7 @@ pub enum FlashBank {
 
 impl FlashBank {
     pub fn to_bank_bit(&self) -> bool {
-        match self {
-            FlashBank::Bank1 => false,
-            _ => true,
-        }
+        matches!(self, FlashBank::Bank2)
     }
 
     pub fn is_dual(&self) -> bool {
@@ -571,8 +579,12 @@ impl<PINS> Qspi<PINS> {
 }
 
 impl<PINS> super::iqspi::IQspi for Qspi<PINS> {
-    fn fmode(&self) -> u8 {
-        self.qspi.ccr.read().fmode().bits()
+    fn bank(&self) -> FlashBank {
+        self.flash_bank
+    }
+
+    fn is_memory_mapped(&self) -> bool {
+        self.qspi.ccr.read().fmode().bits() == 0b11
     }
 
     fn is_busy(&self) -> bool {

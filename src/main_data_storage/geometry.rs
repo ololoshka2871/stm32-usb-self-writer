@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
 pub enum FlashBanks {
     One,
     Two,
@@ -14,7 +14,7 @@ impl FlashBanks {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
 pub struct StorageGeometry {
     pub block_size_bytes: u32,
     pub write_granularity_bytes: u32,

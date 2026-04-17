@@ -234,10 +234,10 @@ where
     cortex_m::asm::delay(clocks.sysclk().0 / 100); // ~10ms delay
     flash_reset_pin.set_high().ok();
 
-    let shared_qspi: &'static SharedQUADSPI = Box::leak(Box::new(SharedQUADSPI::new(
-        qspi,
-        unsafe { core::mem::transmute(&mut rcc.ahb3) },
-    )));
+    let shared_qspi: &'static SharedQUADSPI =
+        Box::leak(Box::new(SharedQUADSPI::new(qspi, unsafe {
+            core::mem::transmute(&mut rcc.ahb3)
+        })));
 
     let clk_virtual = clk_pin.virtual_clk();
 
@@ -296,12 +296,12 @@ where
                     defmt::Debug2Format(&id_ch1)
                 );
 
-                return stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter_dual::<
+                stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter_dual::<
                     M,
                     _,
                     _,
                 >(qspi_ch1, id_ch1, qspi_ch2, id_ch2, clocks.sysclk())
-                .expect("Failed to initialize dual shared QSPI storage adapter");
+                .expect("Failed to initialize dual shared QSPI storage adapter")
             } else {
                 defmt::panic!(
                     "JDEC ID mismatch! Bank1: {}, Bank2: {} - possible PCB/assembly issue",

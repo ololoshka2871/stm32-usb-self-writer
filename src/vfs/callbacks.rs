@@ -50,7 +50,13 @@ pub(crate) unsafe extern "C" fn unpack_reader(
         .for_each(|(n, d)| *dest.add(n) = d);
 }
 
-pub (crate) unsafe extern "C" fn null_read(_dest: *mut u8, _size: i32, _offset: u32, _userdata: usize) {}
+pub(crate) unsafe extern "C" fn null_read(
+    _dest: *mut u8,
+    _size: i32,
+    _offset: u32,
+    _userdata: usize,
+) {
+}
 
 pub(crate) const STORAGE_VIEW_RAW: usize = 1;
 pub(crate) const STORAGE_VIEW_USED: usize = 2;
@@ -157,11 +163,9 @@ pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32
         return;
     }
 
-    let out = core::slice::from_raw_parts_mut(dest, size as usize);
-    out.fill(0);
-
     crate::main_data_storage::refresh_runtime_snapshot();
     if crate::main_data_storage::is_erase_in_progress() {
+        defmt::error!("Read blocked: storage erase is in progress");
         return;
     }
 
@@ -174,11 +178,32 @@ pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32
 
     let offset = offset as usize;
     if offset >= limit {
+        defmt::error!(
+            "Read blocked: offset {:#x} is out of range for (limit {:#x})",
+            offset,
+            limit
+        );
         return;
     }
 
+    // Attempt zero-copy path: write a DirectReadHack so BulkOnlyTransport reads
+    // directly from the QSPI memory-mapped window instead of copying into dest.
+    // Only works for bank-1 blocks; bank-2 blocks fall through to the regular path.
+    match crate::qspi_storage::runtime_try_memory_mapped_hack(offset, dest, size as usize) {
+        Ok(()) => return,
+        Err(e) => {
+            defmt::error!(
+                "Failed to install direct-read hack: offset={:#x}, size={}: {}",
+                offset,
+                size,
+                defmt::Debug2Format(&e)
+            );
+        }
+    }
+
+    // Fallback: copy data into the BOT buffer the normal way.
+    let out = core::slice::from_raw_parts_mut(dest, size as usize);
     let readable = core::cmp::min(out.len(), limit - offset);
     let target = &mut out[..readable];
-
     let _ = crate::main_data_storage::read_range(offset, target);
 }

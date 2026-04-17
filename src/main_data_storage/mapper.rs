@@ -12,7 +12,7 @@ pub struct OffsetAddress {
     pub local_byte_offset: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
 pub enum MapperError {
     BlockOutOfRange,
     OffsetOutOfRange,
