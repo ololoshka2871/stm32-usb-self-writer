@@ -141,22 +141,6 @@ pub(crate) unsafe extern "C" fn meminfo_read(
         ),
     }
 }
-//
-//pub(crate) unsafe extern "C" fn master_read(
-//    dest: *mut u8,
-//    _size: i32,
-//    _offset: u32,
-//    userdata: usize,
-//) {
-//    let boxed = alloc::boxed::Box::from_raw(
-//        userdata as *mut crate::sensors::freqmeter::master_counter::MasterTimerInfo,
-//    );
-//
-//    let s = alloc::format!("0x{:08X}", boxed.value().0);
-//    core::ptr::copy_nonoverlapping(s.as_ptr(), dest, s.len());
-//
-//    core::mem::forget(boxed);
-//}
 
 pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32, userdata: usize) {
     if size <= 0 {
@@ -184,21 +168,6 @@ pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32
             limit
         );
         return;
-    }
-
-    // Attempt zero-copy path: write a DirectReadHack so BulkOnlyTransport reads
-    // directly from the QSPI memory-mapped window instead of copying into dest.
-    // Only works for bank-1 blocks; bank-2 blocks fall through to the regular path.
-    match crate::qspi_storage::runtime_try_memory_mapped_hack(offset, dest, size as usize) {
-        Ok(()) => return,
-        Err(e) => {
-            defmt::error!(
-                "Failed to install direct-read hack: offset={:#x}, size={}: {}",
-                offset,
-                size,
-                defmt::Debug2Format(&e)
-            );
-        }
     }
 
     // Fallback: copy data into the BOT buffer the normal way.

@@ -140,7 +140,7 @@ impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'sta
         self.qspi.is_memory_mapped()
     }
 
-    fn enter_sleep(&mut self) -> Result<(), QspiError> {
+    fn _enter_sleep(&mut self) -> Result<(), QspiError> {
         self.cancel_memory_mapping()?;
 
         let wake_up_cmd = QspiWriteCommand {

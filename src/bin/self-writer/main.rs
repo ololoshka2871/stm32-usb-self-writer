@@ -640,9 +640,6 @@ mod app {
         } else {
             defmt::info!("Settings saved");
         }
-
-        // reset device
-        //cortex_m::peripheral::SCB::sys_reset();
     }
 
     #[task(
