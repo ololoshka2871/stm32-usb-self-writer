@@ -83,6 +83,7 @@ mod app {
             stm32_usb_self_writer::vfs::EMfatStorage,
         >,
         serial: usbd_serial::CdcAcmClass<'static, stm32_usbd::UsbBus<UsbPeriph>>,
+        usb_notify: no_std_async::Condvar,
 
         output_storage: stm32_usb_self_writer::workmodes::output_storage::OutputStorage,
     }
@@ -353,6 +354,7 @@ mod app {
             sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
             calc_results::spawn().expect("Failed to spawn calc_results task");
 
+            usb_task::spawn().expect("Failed to spawn usb_task task");
             protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
             read_analog::spawn().expect("Failed to spawn read_analog task");
         } else {
@@ -388,6 +390,7 @@ mod app {
                 usb_dev,
                 scsi,
                 serial,
+                usb_notify: no_std_async::Condvar::new(),
 
                 output_storage: Default::default(),
             },
@@ -451,6 +454,11 @@ mod app {
             capturer = ctx.shared.f2_capturer,
             transfer = ctx.shared.transfer_fin2,
         );
+    }
+
+    #[task(binds = USB_FS, shared = [&usb_notify], priority = 1)]
+    fn usb_fs(ctx: usb_fs::Context) {
+        ctx.shared.usb_notify.notify_one();
     }
 
     // Приоритет строго равен sync_freqmeter*, иначе Deadlock на мьютексе rtc_sync
@@ -637,106 +645,106 @@ mod app {
         //cortex_m::peripheral::SCB::sys_reset();
     }
 
-    //#[task(
-    //    shared = [
-    //        usb_dev,
-    //        scsi,
-    //        serial,
-    //        led,
-    //        settings,
-    //    ],
-    //    local = [
-    //        protobuf_input_tx,
-    //        protobuf_output_rx,
-    //    ],
-    //    priority = 1
-    //)]
-    //async fn usb_task(ctx: usb_task::Context) {
-    //    use alloc::boxed::Box;
-    //
-    //    let usb_notify = ctx.shared.usb_notify;
-    //
-    //    let mut usb_dev = ctx.shared.usb_dev;
-    //    let mut scsi = ctx.shared.scsi;
-    //    let mut serial = ctx.shared.serial;
-    //    let mut led = ctx.shared.led;
-    //    let mut settings = ctx.shared.settings;
-    //
-    //    let protobuf_input_tx = ctx.local.protobuf_input_tx;
-    //    let protobuf_output_rx = ctx.local.protobuf_output_rx;
-    //
-    //    defmt::info!("USB task started");
-    //
-    //    let long_wait = config::Duration::millis(10);
-    //    let short_wait = config::Duration::millis(1);
-    //
-    //    let mut tx_data = Option::<Vec<u8>>::None;
-    //    let mut wait = long_wait;
-    //
-    //    // Проблема: settings имеет время жизни 'a, и его нельзя упаковать в замыкание и в Box
-    //    // Гарантируется, что unsafe_settings_ptr будет использован только в стеке этой функции
-    //    // и не будет передан в другие потоки, поэтому это безопасно
-    //    let unsafe_settings_ptr =
-    //        settings.lock(|settings| settings.ref_mut().0 as *const settings::AppSettings);
-    //    let settings_accessor =
-    //        move || -> settings::AppSettings { unsafe { &*unsafe_settings_ptr }.clone() };
-    //
-    //    scsi.lock(move |scsi| {
-    //        scsi.block_device_mut()
-    //            .set_settings_accessor(Box::new(settings_accessor));
-    //    });
-    //
-    //    let mut res = false;
-    //    loop {
-    //        led.lock(|led| led.set_state(config::LED_DISABLE));
-    //        Mono::timeout_after(wait, usb_notify.wait()).await.ok();
-    //        led.lock(|led| led.set_state(config::LED_ENABLE));
-    //
-    //        wait = long_wait; // default response
-    //
-    //        // Важно! Список передаваемый сюда в том же порядке,
-    //        // что были инициализированы интерфейсы
-    //        res = (&mut usb_dev, &mut scsi, &mut serial)
-    //            .lock(|usb_dev, scsi, serial| usb_dev.poll(&mut [scsi, serial]));
-    //
-    //        if res && !protobuf_input_tx.is_full() {
-    //            while let Ok(data) = serial.lock(|serial| {
-    //                let mut buf = [0u8; config::BULK_MAX_PACKET_SIZE];
-    //                serial.read_packet(&mut buf).map(|len| buf[..len].to_vec())
-    //            }) {
-    //                protobuf_input_tx.send(data).await.ok();
-    //            }
-    //
-    //            wait = short_wait; // fast response
-    //        }
-    //
-    //        // send data from protobuf server if exists
-    //        if let Some(mut data) = tx_data.take() {
-    //            let to_send = data.len().min(config::BULK_MAX_PACKET_SIZE);
-    //            match serial.lock(|serial| serial.write_packet(&data[..to_send])) {
-    //                Ok(size) => {
-    //                    if size < data.len() {
-    //                        data.drain(..size);
-    //                        tx_data.replace(data);
-    //
-    //                        wait = short_wait; // fast response
-    //                    }
-    //                }
-    //                Err(usb_device::UsbError::WouldBlock) => {
-    //                    tx_data.replace(data);
-    //                    wait = short_wait; // fast response
-    //                }
-    //                Err(e) => {
-    //                    defmt::error!("Failed to send data over USB: {}", defmt::Debug2Format(&e));
-    //                }
-    //            }
-    //        } else if let Ok(data) = protobuf_output_rx.try_recv() {
-    //            tx_data.replace(data);
-    //
-    //            wait = short_wait; // fast response
-    //        }
-    //    }
-    //}
+    #[task(
+        shared = [
+            &usb_notify,
+            usb_dev,
+            scsi,
+            serial,
+            led,
+            settings,
+        ],
+        local = [
+            protobuf_input_tx,
+            protobuf_output_rx,
+        ],
+        priority = 1
+    )]
+    async fn usb_task(ctx: usb_task::Context) {
+        use alloc::boxed::Box;
+
+        let usb_notify = ctx.shared.usb_notify;
+
+        let mut usb_dev = ctx.shared.usb_dev;
+        let mut scsi = ctx.shared.scsi;
+        let mut serial = ctx.shared.serial;
+        let mut led = ctx.shared.led;
+        let mut settings = ctx.shared.settings;
+
+        let protobuf_input_tx = ctx.local.protobuf_input_tx;
+        let protobuf_output_rx = ctx.local.protobuf_output_rx;
+
+        defmt::info!("USB task started");
+
+        let long_wait = config::Duration::millis(10);
+        let short_wait = config::Duration::millis(1);
+
+        let mut tx_data = Option::<Vec<u8>>::None;
+        let mut wait = long_wait;
+
+        // Проблема: settings имеет время жизни 'a, и его нельзя упаковать в замыкание и в Box
+        // Гарантируется, что unsafe_settings_ptr будет использован только в стеке этой функции
+        // и не будет передан в другие потоки, поэтому это безопасно
+        let unsafe_settings_ptr =
+            settings.lock(|settings| settings.ref_mut().0 as *const settings::AppSettings);
+        let settings_accessor =
+            move || -> settings::AppSettings { unsafe { &*unsafe_settings_ptr }.clone() };
+
+        scsi.lock(move |scsi| {
+            scsi.block_device_mut()
+                .set_settings_accessor(Box::new(settings_accessor));
+        });
+
+        loop {
+            led.lock(|led| led.set_state(config::LED_DISABLE));
+            Mono::timeout_after(wait, usb_notify.wait()).await.ok();
+            led.lock(|led| led.set_state(config::LED_ENABLE));
+
+            wait = long_wait; // default response
+
+            // Важно! Список передаваемый сюда в том же порядке,
+            // что были инициализированы интерфейсы
+            let res = (&mut usb_dev, &mut scsi, &mut serial)
+                .lock(|usb_dev, scsi, serial| usb_dev.poll(&mut [scsi, serial]));
+
+            if res && !protobuf_input_tx.is_full() {
+                while let Ok(data) = serial.lock(|serial| {
+                    let mut buf = [0u8; config::BULK_MAX_PACKET_SIZE];
+                    serial.read_packet(&mut buf).map(|len| buf[..len].to_vec())
+                }) {
+                    protobuf_input_tx.send(data).await.ok();
+                }
+
+                wait = short_wait; // fast response
+            }
+
+            // send data from protobuf server if exists
+            if let Some(mut data) = tx_data.take() {
+                let to_send = data.len().min(config::BULK_MAX_PACKET_SIZE);
+                match serial.lock(|serial| serial.write_packet(&data[..to_send])) {
+                    Ok(size) => {
+                        if size < data.len() {
+                            data.drain(..size);
+                            tx_data.replace(data);
+
+                            wait = short_wait; // fast response
+                        }
+                    }
+                    Err(usb_device::UsbError::WouldBlock) => {
+                        tx_data.replace(data);
+                        wait = short_wait; // fast response
+                    }
+                    Err(e) => {
+                        defmt::error!("Failed to send data over USB: {}", defmt::Debug2Format(&e));
+                    }
+                }
+            } else if let Ok(data) = protobuf_output_rx.try_recv() {
+                tx_data.replace(data);
+
+                wait = short_wait; // fast response
+            }
+        }
+    }
 
     #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 1)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
@@ -839,88 +847,5 @@ mod app {
             "Startup signal done, measuring will start after {} seconds",
             start_delay.to_secs()
         );
-    }
-
-    #[idle(
-        shared = [
-            usb_dev,
-            scsi,
-            serial,
-            led,
-            settings,
-        ],
-        local = [
-            protobuf_input_tx,
-            protobuf_output_rx,
-        ]
-    )]
-    fn idle(ctx: idle::Context) -> ! {
-        use alloc::boxed::Box;
-
-        let mut usb_dev = ctx.shared.usb_dev;
-        let mut scsi = ctx.shared.scsi;
-        let mut serial = ctx.shared.serial;
-        let mut led = ctx.shared.led;
-        let mut settings = ctx.shared.settings;
-
-        let protobuf_input_tx = ctx.local.protobuf_input_tx;
-        let protobuf_output_rx = ctx.local.protobuf_output_rx;
-
-        defmt::info!("USB task started");
-
-        let mut tx_data = Option::<Vec<u8>>::None;
-
-        // Проблема: settings имеет время жизни 'a, и его нельзя упаковать в замыкание и в Box
-        // Гарантируется, что unsafe_settings_ptr будет использован только в стеке этой функции
-        // и не будет передан в другие потоки, поэтому это безопасно
-        let unsafe_settings_ptr =
-            settings.lock(|settings| settings.ref_mut().0 as *const settings::AppSettings);
-        let settings_accessor =
-            move || -> settings::AppSettings { unsafe { &*unsafe_settings_ptr }.clone() };
-
-        scsi.lock(move |scsi| {
-            scsi.block_device_mut()
-                .set_settings_accessor(Box::new(settings_accessor));
-        });
-
-        loop {
-            led.lock(|led| led.set_state(config::LED_ENABLE));
-            // Важно! Список передаваемый сюда в том же порядке,
-            // что были инициализированы интерфейсы
-            let res = (&mut usb_dev, &mut scsi, &mut serial)
-                .lock(|usb_dev, scsi, serial| usb_dev.poll(&mut [scsi, serial]));
-
-            led.lock(|led| led.set_state(config::LED_DISABLE));
-
-            if res && !protobuf_input_tx.is_full() {
-                while let Ok(data) = serial.lock(|serial| {
-                    let mut buf = [0u8; config::BULK_MAX_PACKET_SIZE];
-                    serial.read_packet(&mut buf).map(|len| buf[..len].to_vec())
-                }) {
-                    protobuf_input_tx.try_send(data).ok();
-                }
-            }
-
-            // send data from protobuf server if exists
-            if let Some(mut data) = tx_data.take() {
-                let to_send = data.len().min(config::BULK_MAX_PACKET_SIZE);
-                match serial.lock(|serial| serial.write_packet(&data[..to_send])) {
-                    Ok(size) => {
-                        if size < data.len() {
-                            data.drain(..size);
-                            tx_data.replace(data);
-                        }
-                    }
-                    Err(usb_device::UsbError::WouldBlock) => {
-                        tx_data.replace(data);
-                    }
-                    Err(e) => {
-                        defmt::error!("Failed to send data over USB: {}", defmt::Debug2Format(&e));
-                    }
-                }
-            } else if let Ok(data) = protobuf_output_rx.try_recv() {
-                tx_data.replace(data);
-            }
-        }
     }
 }
