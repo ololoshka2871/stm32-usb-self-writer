@@ -8,7 +8,6 @@ use identification::Identification;
 use qspi_stm32lx3::iqspi::IQspi;
 
 use alloc::{boxed::Box, sync::Arc};
-use cortex_m::interrupt::Mutex as InterruptMutex;
 
 use qspi_driver::{FlashDriver, QSpiDriver};
 
@@ -16,8 +15,7 @@ use qspi_driver::QspiError;
 
 use crate::config;
 use crate::main_data_storage::{
-    BlockMapper, FlashBanks, StorageDriver, StorageError, StorageGeometry, StorageInfo,
-    StorageMetaHandle, install_meta_handle, install_read_range_fn,
+    BlockMapper, FlashBanks, StorageContext, StorageError, StorageGeometry, StorageMode,
 };
 
 type RuntimeDriver = Arc<RefCell<Box<dyn FlashDriver + 'static>>>;
@@ -29,44 +27,16 @@ struct RuntimeReadAdapter {
     mapper: BlockMapper,
 }
 
-struct RuntimeAdapterStore {
-    inner: InterruptMutex<RefCell<Option<RuntimeReadAdapter>>>,
-}
-
-impl RuntimeAdapterStore {
-    fn new() -> Self {
-        Self {
-            inner: InterruptMutex::new(RefCell::new(None)),
-        }
-    }
-
-    fn replace(&self, adapter: RuntimeReadAdapter) {
-        cortex_m::interrupt::free(|cs| {
-            self.inner.borrow(cs).borrow_mut().replace(adapter);
-        });
-    }
-
-    fn get_cloned(&self) -> Option<RuntimeReadAdapter> {
-        cortex_m::interrupt::free(|cs| self.inner.borrow(cs).borrow().clone())
-    }
-}
-
-unsafe impl Sync for RuntimeAdapterStore {}
-unsafe impl Send for RuntimeAdapterStore {}
-
-lazy_static::lazy_static! {
-    static ref RUNTIME_DRIVER: RuntimeAdapterStore = RuntimeAdapterStore::new();
-}
-
 pub struct QSPIStorage {
-    driver: Arc<RefCell<Box<dyn FlashDriver + 'static>>>,
+    adapter: RuntimeReadAdapter,
+    geometry: StorageGeometry,
+    startup_used_blocks: u32,
 }
 
 impl QSPIStorage {
-    pub fn new<QSPI, M>(
+    pub fn new_single<QSPI, M>(
         qspi: QSPI,
         id: Identification,
-        dual: bool,
         sys_clk: stm32l4xx_hal::time::Hertz,
     ) -> Result<Self, QspiError>
     where
@@ -74,72 +44,70 @@ impl QSPIStorage {
         M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant>
             + 'static,
     {
-        QSpiDriver::<M>::init(Box::new(qspi), id, dual, sys_clk).map(|d| Self { driver: d })
+        let primary = QSpiDriver::<M>::init(Box::new(qspi), id, false, sys_clk)?;
+        let geometry = geometry_from_driver(&primary, FlashBanks::One);
+        let mapper = BlockMapper::new(geometry);
+
+        let adapter = RuntimeReadAdapter {
+            primary,
+            secondary: None,
+            mapper,
+        };
+
+        let startup_used_blocks = scan_used_blocks(&adapter);
+
+        Ok(Self {
+            adapter,
+            geometry,
+            startup_used_blocks,
+        })
     }
 
-    fn read_range(&self, global_offset: usize, dest: &mut [u8]) -> Result<(), StorageError> {
-        read_range_with_driver(&self.driver, global_offset, dest)
+    pub fn new_dual<QSPI1, QSPI2, M>(
+        qspi1: QSPI1,
+        id1: Identification,
+        qspi2: QSPI2,
+        id2: Identification,
+        sys_clk: stm32l4xx_hal::time::Hertz,
+    ) -> Result<Self, QspiError>
+    where
+        QSPI1: IQspi + 'static,
+        QSPI2: IQspi + 'static,
+        M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant>
+            + 'static,
+    {
+        let primary = QSpiDriver::<M>::init(Box::new(qspi1), id1, false, sys_clk)?;
+        let secondary = QSpiDriver::<M>::init(Box::new(qspi2), id2, false, sys_clk)?;
+        let geometry = geometry_from_driver(&primary, FlashBanks::Two);
+        let mapper = BlockMapper::new(geometry);
+
+        let adapter = RuntimeReadAdapter {
+            primary,
+            secondary: Some(secondary),
+            mapper,
+        };
+
+        let startup_used_blocks = scan_used_blocks(&adapter);
+
+        Ok(Self {
+            adapter,
+            geometry,
+            startup_used_blocks,
+        })
     }
-}
 
-pub fn install_runtime_storage_adapter<M, QSPI1>(
-    qspi1: QSPI1,
-    id1: Identification,
-    sys_clk: stm32l4xx_hal::time::Hertz,
-) -> Result<StorageMetaHandle, QspiError>
-where
-    QSPI1: IQspi + 'static,
-    M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static,
-{
-    let primary = QSpiDriver::<M>::init(Box::new(qspi1), id1, false, sys_clk)?;
-    let geometry = geometry_from_driver(&primary, FlashBanks::One);
-    let mapper = BlockMapper::new(geometry);
+    pub fn into_context(self, mode: StorageMode) -> StorageContext {
+        let adapter_ptr = Box::into_raw(Box::new(self.adapter)) as usize;
 
-    let adapter = RuntimeReadAdapter {
-        primary,
-        secondary: None,
-        mapper,
-    };
-    let meta = StorageMetaHandle::new(geometry);
-    meta.set_used_blocks(scan_used_blocks(&adapter));
-
-    install_meta_handle(meta);
-    RUNTIME_DRIVER.replace(adapter);
-    install_read_range_fn(runtime_read_range);
-
-    Ok(meta)
-}
-
-pub fn install_runtime_storage_adapter_dual<M, QSPI1, QSPI2>(
-    qspi1: QSPI1,
-    id1: Identification,
-    qspi2: QSPI2,
-    id2: Identification,
-    sys_clk: stm32l4xx_hal::time::Hertz,
-) -> Result<StorageMetaHandle, QspiError>
-where
-    QSPI1: IQspi + 'static,
-    QSPI2: IQspi + 'static,
-    M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static,
-{
-    let primary = QSpiDriver::<M>::init(Box::new(qspi1), id1, false, sys_clk)?;
-    let secondary = QSpiDriver::<M>::init(Box::new(qspi2), id2, false, sys_clk)?;
-    let geometry = geometry_from_driver(&primary, FlashBanks::Two);
-    let mapper = BlockMapper::new(geometry);
-
-    let adapter = RuntimeReadAdapter {
-        primary,
-        secondary: Some(secondary),
-        mapper,
-    };
-    let meta = StorageMetaHandle::new(geometry);
-    meta.set_used_blocks(scan_used_blocks(&adapter));
-
-    install_meta_handle(meta);
-    RUNTIME_DRIVER.replace(adapter);
-    install_read_range_fn(runtime_read_range);
-
-    Ok(meta)
+        StorageContext::new_with_reader(
+            mode,
+            self.geometry,
+            self.startup_used_blocks,
+            adapter_ptr,
+            read_range_from_context,
+            drop_context_reader,
+        )
+    }
 }
 
 fn geometry_from_driver(driver: &RuntimeDriver, banks: FlashBanks) -> StorageGeometry {
@@ -251,9 +219,26 @@ fn scan_used_blocks(adapter: &RuntimeReadAdapter) -> u32 {
     total_blocks
 }
 
-impl StorageDriver for QSPIStorage {
-    fn make_info_accessor(&self, _driver: Arc<dyn StorageDriver>) -> Box<dyn StorageInfo> {
-        todo!()
+fn read_range_from_context(
+    reader_ctx: usize,
+    global_offset: usize,
+    dest: &mut [u8],
+) -> Result<(), StorageError> {
+    if reader_ctx == 0 {
+        return Err(StorageError::NotReady);
+    }
+
+    let adapter = unsafe { &*(reader_ctx as *const RuntimeReadAdapter) };
+    read_range_via_adapter(adapter, global_offset, dest)
+}
+
+fn drop_context_reader(reader_ctx: usize) {
+    if reader_ctx == 0 {
+        return;
+    }
+
+    unsafe {
+        drop(Box::from_raw(reader_ctx as *mut RuntimeReadAdapter));
     }
 }
 
@@ -279,19 +264,4 @@ fn map_qspi_error(e: QspiError) -> StorageError {
         QspiError::Address => StorageError::InvalidAddress,
         QspiError::Unknown => StorageError::Internal,
     }
-}
-
-fn runtime_read_range(global_offset: usize, dest: &mut [u8]) -> Result<(), StorageError> {
-    let adapter: Option<RuntimeReadAdapter> = RUNTIME_DRIVER.get_cloned();
-    if let Some(adapter) = adapter {
-        read_range_via_adapter(&adapter, global_offset, dest)
-    } else {
-        Err(StorageError::NotReady)
-    }
-}
-
-pub fn runtime_get_mapper() -> Option<BlockMapper> {
-    RUNTIME_DRIVER
-        .get_cloned()
-        .map(|adapter| adapter.mapper.clone())
 }

@@ -8,6 +8,12 @@ use heatshrink_rust::{CompressedData, decoder::HeatshrinkDecoder};
 
 use super::StaticBinData;
 
+#[repr(C)]
+pub(crate) struct FlashReadUserData {
+    pub storage_context: *const crate::main_data_storage::StorageContext,
+    pub used_view: bool,
+}
+
 pub(crate) unsafe extern "C" fn const_binary_reader(
     dest: *mut u8,
     size: i32,
@@ -57,9 +63,6 @@ pub(crate) unsafe extern "C" fn null_read(
     _userdata: usize,
 ) {
 }
-
-pub(crate) const STORAGE_VIEW_RAW: usize = 1;
-pub(crate) const STORAGE_VIEW_USED: usize = 2;
 
 pub(crate) unsafe fn store_block_data(s: String, dest: *mut u8, size: i32, offset: u32) {
     let src = s.as_bytes();
@@ -111,7 +114,7 @@ pub(crate) unsafe extern "C" fn meminfo_read(
     dest: *mut u8,
     size: i32,
     offset: u32,
-    _userdata: usize,
+    userdata: usize,
 ) {
     use serde::Serialize;
 
@@ -124,13 +127,18 @@ pub(crate) unsafe extern "C" fn meminfo_read(
         EraseInProgress: bool,
     }
 
-    crate::main_data_storage::refresh_runtime_snapshot();
+    if userdata == 0 {
+        core::ptr::write_bytes(dest, b' ', size as usize);
+        return;
+    }
+
+    let storage_context = &*(userdata as *const crate::main_data_storage::StorageContext);
 
     let info = MemInfo {
-        BlockSizeBytes: crate::main_data_storage::block_size_bytes() as u32,
-        TotalBlocks: crate::main_data_storage::total_blocks(),
-        UsedBlocks: crate::main_data_storage::used_blocks(),
-        EraseInProgress: crate::main_data_storage::is_erase_in_progress(),
+        BlockSizeBytes: storage_context.block_size_bytes() as u32,
+        TotalBlocks: storage_context.total_blocks(),
+        UsedBlocks: storage_context.used_blocks(),
+        EraseInProgress: storage_context.is_erase_in_progress(),
     };
 
     match serde_json::to_string_pretty(&info) {
@@ -147,17 +155,23 @@ pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32
         return;
     }
 
-    crate::main_data_storage::refresh_runtime_snapshot();
-    if crate::main_data_storage::is_erase_in_progress() {
+    if userdata == 0 {
+        return;
+    }
+
+    let read_user_data = &*(userdata as *const FlashReadUserData);
+    let storage_context = &*read_user_data.storage_context;
+
+    if storage_context.is_erase_in_progress() {
         defmt::error!("Read blocked: storage erase is in progress");
         return;
     }
 
-    let is_used_view = userdata == STORAGE_VIEW_USED;
+    let is_used_view = read_user_data.used_view;
     let limit = if is_used_view {
-        crate::main_data_storage::used_size_bytes()
+        storage_context.used_size_bytes()
     } else {
-        crate::main_data_storage::raw_size_bytes()
+        storage_context.raw_size_bytes()
     };
 
     let offset = offset as usize;
@@ -174,5 +188,5 @@ pub(crate) unsafe extern "C" fn flash_read(dest: *mut u8, size: i32, offset: u32
     let out = core::slice::from_raw_parts_mut(dest, size as usize);
     let readable = core::cmp::min(out.len(), limit - offset);
     let target = &mut out[..readable];
-    let _ = crate::main_data_storage::read_range(offset, target);
+    let _ = storage_context.read_range(offset, target);
 }

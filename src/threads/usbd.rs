@@ -56,7 +56,7 @@ pub fn usbd(
     let mut scsi = Scsi::new(
         unsafe { USB_BUS.as_ref().unwrap_unchecked() }, //&usb_bus,
         64, // для устройств full speed: max_packet_size 8, 16, 32 or 64
-        EMfatStorage::new(c_str!("LOGGER")),
+        EMfatStorage::new(c_str!("LOGGER"), None),
         "SCTB", // <= max 8 больших букв
         "SelfWriter",
         "L442",

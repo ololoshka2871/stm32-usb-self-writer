@@ -225,7 +225,7 @@ mod app {
         );
         defmt::info!("\tFreqmeter 2");
 
-        let storage_meta = {
+        let mut storage_context = {
             let flash_reset_pin = gpiod
                 .pd11
                 .into_push_pull_output(&mut gpiod.moder, &mut gpiod.otyper);
@@ -285,7 +285,9 @@ mod app {
             )
         };
 
-        let (usb_dev, scsi, serial) = init_usb(
+        let storage_meta = storage_context.meta_handle();
+
+        let (usb_dev, scsi, serial, storage_context) = init_usb(
             fast_mode,
             UsbPeriph {
                 usb: dp.USB,
@@ -307,7 +309,12 @@ mod app {
                 .unwrap_unchecked()
             },
             usb_device::device::UsbVidPid(0x0483, 0x5720),
+            storage_context,
         );
+
+        if let Some(_storage_context) = storage_context {
+            // TODO: init self-writer context
+        }
 
         // test flash memory-maped read hack
         //unsafe {
@@ -397,6 +404,7 @@ mod app {
             Local {
                 analog_sens,
                 storage_meta,
+
                 master_timer,
 
                 f1_power_pin,

@@ -4,7 +4,7 @@ use qspi_stm32lx3::{
     qspi_shared_channel::QspiSharedChannel,
     stm32l4x3::QUADSPI,
 };
-use stm32_usb_self_writer::main_data_storage::StorageMetaHandle;
+use stm32_usb_self_writer::main_data_storage::{StorageContext, StorageMode};
 use stm32_usb_self_writer::{config, sensors::analog::AnalogSensor, settings};
 use stm32l4xx_hal::{
     adc,
@@ -154,10 +154,12 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     periph: USB,
     bus: &'a mut Option<UsbBusAllocator<stm32_usbd::UsbBus<USB>>>,
     vid_pid: usb_device::device::UsbVidPid,
+    storage_context: StorageContext,
 ) -> (
     usb_device::device::UsbDevice<'a, stm32_usbd::UsbBus<USB>>,
     usbd_scsi::Scsi<'a, stm32_usbd::UsbBus<USB>, stm32_usb_self_writer::vfs::EMfatStorage>,
     CdcAcmClass<'a, stm32_usbd::UsbBus<USB>>,
+    Option<StorageContext>,
 ) {
     if !is_enabled {
         defmt::info!("\tUSB not enabled, skipping USB initialization");
@@ -169,6 +171,7 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
                 core::mem::MaybeUninit::zeroed().assume_init(),
                 #[allow(invalid_value)]
                 core::mem::MaybeUninit::zeroed().assume_init(),
+                Some(storage_context),
             )
         };
     }
@@ -182,7 +185,10 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
     let scsi = usbd_scsi::Scsi::new(
         bus,
         config::BULK_MAX_PACKET_SIZE as u16, // для устройств full speed: max_packet_size 8, 16, 32 or 64
-        stm32_usb_self_writer::vfs::EMfatStorage::new(my_proc_macro::c_str!("LOGGER")),
+        stm32_usb_self_writer::vfs::EMfatStorage::new(
+            my_proc_macro::c_str!("LOGGER"),
+            storage_context,
+        ),
         "SCTB", // <= max 8 больших букв
         "SelfWriter",
         "L433",
@@ -202,7 +208,7 @@ pub fn init_usb<'a, USB: stm32_usbd::UsbPeripheral>(
 
     defmt::info!("USB ready!");
 
-    (usb_dev, scsi, serial)
+    (usb_dev, scsi, serial, None)
 }
 
 pub fn init_storage<M, R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO1_2, IO2_2, IO3_2>(
@@ -213,8 +219,7 @@ pub fn init_storage<M, R, CLK, NCS1, IO0_1, IO1_1, IO2_1, IO3_1, NCS2, IO0_2, IO
     pins_ch2: (NCS2, IO0_2, IO1_2, IO2_2, IO3_2),
     rcc: &mut rcc::Rcc,
     clocks: &Clocks,
-) -> StorageMetaHandle
-/* -> QSPIStorage*/
+) -> StorageContext
 where
     M: rtic_monotonics::Monotonic<Duration = config::Duration, Instant = config::Instant> + 'static,
     R: embedded_hal::digital::v2::OutputPin + 'static,
@@ -296,12 +301,15 @@ where
                     defmt::Debug2Format(&id_ch1)
                 );
 
-                stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter_dual::<
-                    M,
-                    _,
-                    _,
-                >(qspi_ch1, id_ch1, qspi_ch2, id_ch2, clocks.sysclk())
+                return stm32_usb_self_writer::qspi_storage::QSPIStorage::new_dual::<_, _, M>(
+                    qspi_ch1,
+                    id_ch1,
+                    qspi_ch2,
+                    id_ch2,
+                    clocks.sysclk(),
+                )
                 .expect("Failed to initialize dual shared QSPI storage adapter")
+                .into_context(StorageMode::Usb);
             } else {
                 defmt::panic!(
                     "JDEC ID mismatch! Bank1: {}, Bank2: {} - possible PCB/assembly issue",
@@ -313,22 +321,24 @@ where
         (Ok(id_ch1), Err(_)) => {
             defmt::warn!("Only Bank1 responded in SharedQUADSPI mode");
 
-            return stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter::<M, _>(
+            return stm32_usb_self_writer::qspi_storage::QSPIStorage::new_single::<_, M>(
                 qspi_ch1,
                 id_ch1,
                 clocks.sysclk(),
             )
-            .expect("Failed to initialize bank1 shared QSPI storage adapter");
+            .expect("Failed to initialize bank1 shared QSPI storage adapter")
+            .into_context(StorageMode::Usb);
         }
         (Err(_), Ok(id_ch2)) => {
             defmt::warn!("Only Bank2 responded in SharedQUADSPI mode");
 
-            return stm32_usb_self_writer::qspi_storage::install_runtime_storage_adapter::<M, _>(
+            return stm32_usb_self_writer::qspi_storage::QSPIStorage::new_single::<_, M>(
                 qspi_ch2,
                 id_ch2,
                 clocks.sysclk(),
             )
-            .expect("Failed to initialize bank2 shared QSPI storage adapter");
+            .expect("Failed to initialize bank2 shared QSPI storage adapter")
+            .into_context(StorageMode::Usb);
         }
         (Err(_), Err(_)) => {
             defmt::panic!("No QSPI flash detected on any bank!");

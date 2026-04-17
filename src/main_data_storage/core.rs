@@ -21,12 +21,8 @@ where
         geometry.validate()?;
 
         let mapper = BlockMapper::new(geometry);
-        let meta = StorageMetaHandle::new(geometry);
-        let context = StorageContext {
-            mode,
-            geometry,
-            meta,
-        };
+        let mut context = StorageContext::new_without_reader(mode, geometry);
+        let _ = context.meta_handle();
 
         Ok(Self {
             backend,
@@ -36,8 +32,8 @@ where
     }
 
     #[inline]
-    pub fn context(&self) -> StorageContext {
-        self.context
+    pub fn context(&self) -> &StorageContext {
+        &self.context
     }
 
     #[inline]
@@ -46,70 +42,77 @@ where
     }
 
     #[inline]
-    pub fn meta(&self) -> StorageMetaHandle {
-        self.context.meta
+    pub fn meta(&mut self) -> StorageMetaHandle {
+        self.context.meta_handle()
     }
 
     pub fn set_mode(&mut self, mode: StorageMode) {
-        self.context.mode = mode;
+        self.context.set_mode(mode);
     }
 
     pub fn startup_scan(&mut self) -> Result<u32, StorageError> {
         let used = self.backend.scan_used_blocks()?;
-        self.context.meta.set_used_blocks(used);
-        Ok(self.context.meta.used_blocks())
+        let meta = self.context.meta_handle();
+        meta.set_used_blocks(used);
+        Ok(meta.used_blocks())
     }
 
     pub fn write_next_block(&mut self, data: &[u8]) -> Result<u32, StorageError> {
-        if self.context.mode != StorageMode::Recorder {
+        if self.context.mode() != StorageMode::Recorder {
             return Err(StorageError::NotReady);
         }
-        if data.len() != self.context.geometry.block_size_bytes as usize {
+        let geometry = self.context.geometry();
+        if data.len() != geometry.block_size_bytes as usize {
             return Err(StorageError::InvalidAddress);
         }
 
-        let next_block = self.context.meta.used_blocks();
-        if next_block >= self.context.geometry.total_blocks() {
+        let meta = self.context.meta_handle();
+        let next_block = meta.used_blocks();
+        if next_block >= geometry.total_blocks() {
             return Err(StorageError::NotReady);
         }
 
-        self.context.meta.set_busy(true);
+        meta.set_busy(true);
         self.backend.set_sleep(false)?;
         let result = self.backend.write_block(next_block, data);
         let _ = self.backend.set_sleep(true);
-        self.context.meta.set_busy(false);
+        meta.set_busy(false);
 
         result.map(|_| {
-            self.context.meta.increment_used_blocks();
+            meta.increment_used_blocks();
             next_block
         })
     }
 
     pub fn read_range(&mut self, offset: usize, dest: &mut [u8]) -> Result<(), StorageError> {
-        if self.context.meta.erase_in_progress() {
+        if self.context.meta_handle().erase_in_progress() {
             return Err(StorageError::NotReady);
         }
         self.backend.read_range(offset, dest)
     }
 
     pub fn request_erase(&self) -> Result<(), super::StorageMetaError> {
-        self.context.meta.request_erase()
+        self.context
+            .meta_handle_if_present()
+            .ok_or(super::StorageMetaError::EraseAlreadyInProgress)?
+            .request_erase()
     }
 
     pub fn process_pending_erase(&mut self) -> Result<bool, StorageError> {
-        if !self.context.meta.take_erase_request() {
+        let meta = self.context.meta_handle();
+        if !meta.take_erase_request() {
             return Ok(false);
         }
 
-        self.context.meta.set_erase_in_progress(true);
-        self.context.meta.set_busy(true);
+        meta.set_erase_in_progress(true);
+        meta.set_busy(true);
         let erase_result = self.backend.erase_all();
-        self.context.meta.set_busy(false);
-        self.context.meta.set_erase_in_progress(false);
+        meta.set_busy(false);
+        meta.set_erase_in_progress(false);
 
         match erase_result {
             Ok(()) => {
-                self.context.meta.reset_used_blocks();
+                meta.reset_used_blocks();
                 Ok(true)
             }
             Err(e) => Err(e),
