@@ -105,6 +105,7 @@ impl QSPIStorage {
             self.startup_used_blocks,
             adapter_ptr,
             read_range_from_context,
+            write_block_from_context,
             drop_context_reader,
             erase_from_context,
         )
@@ -241,6 +242,59 @@ fn erase_with_driver(driver: &RuntimeDriver) -> Result<(), StorageError> {
     guard.want_sleep();
 
     Ok(())
+}
+
+fn write_block_with_driver(
+    driver: &RuntimeDriver,
+    local_offset: usize,
+    data: &[u8],
+) -> Result<(), StorageError> {
+    let mut guard = driver.borrow_mut();
+
+    guard.wake_up().map_err(map_qspi_error)?;
+
+    let (extender, addr) = guard.config().wrap_adress(local_offset);
+    guard.set_addr_extender(extender).map_err(map_qspi_error)?;
+    guard.write_block(addr, data).map_err(map_qspi_error)?;
+    guard.want_sleep();
+
+    Ok(())
+}
+
+fn write_block_via_adapter(
+    adapter: &RuntimeReadAdapter,
+    global_block_index: u32,
+    data: &[u8],
+) -> Result<(), StorageError> {
+    let block = adapter
+        .mapper
+        .map_block(global_block_index)
+        .map_err(|_| StorageError::InvalidAddress)?;
+
+    let target_driver = if block.bank_index == 0 {
+        &adapter.primary
+    } else {
+        adapter
+            .secondary
+            .as_ref()
+            .ok_or(StorageError::InvalidAddress)?
+    };
+
+    let local_offset = block.local_block_index as usize * adapter.mapper.geometry().block_size_bytes as usize;
+    write_block_with_driver(target_driver, local_offset, data)
+}
+
+fn write_block_from_context(
+    reader_ctx: usize,
+    global_block_index: u32,
+    data: &[u8],
+) -> Result<(), StorageError> {
+    if reader_ctx == 0 {
+        return Err(StorageError::NotReady);
+    }
+
+    let adapter = unsafe { &*(reader_ctx as *const RuntimeReadAdapter) };
+    write_block_via_adapter(adapter, global_block_index, data)
 }
 
 fn erase_all_via_adapter(adapter: &RuntimeReadAdapter) -> Result<(), StorageError> {

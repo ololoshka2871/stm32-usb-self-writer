@@ -7,6 +7,7 @@ pub enum StorageMode {
 }
 
 pub type StorageReadRangeFn = fn(usize, usize, &mut [u8]) -> Result<(), StorageError>;
+pub type StorageWriteBlockFn = fn(usize, u32, &[u8]) -> Result<(), StorageError>;
 pub type StorageReaderDropFn = fn(usize);
 pub type StorageEraseFn = fn(usize) -> Result<(), StorageError>;
 
@@ -57,6 +58,10 @@ fn no_reader_read(
 
 fn no_reader_drop(_reader_ctx: usize) {}
 
+fn no_write_block(_reader_ctx: usize, _global_block_index: u32, _data: &[u8]) -> Result<(), StorageError> {
+    Err(StorageError::NotReady)
+}
+
 fn no_erase(_reader_ctx: usize) -> Result<(), StorageError> {
     Err(StorageError::NotReady)
 }
@@ -68,6 +73,7 @@ pub struct StorageContext {
     initial_used_blocks: u32,
     reader_ctx: usize,
     read_range_fn: StorageReadRangeFn,
+    write_block_fn: StorageWriteBlockFn,
     reader_drop_fn: StorageReaderDropFn,
     erase_fn: StorageEraseFn,
 }
@@ -81,6 +87,7 @@ impl StorageContext {
             initial_used_blocks: 0,
             reader_ctx: 0,
             read_range_fn: no_reader_read,
+            write_block_fn: no_write_block,
             reader_drop_fn: no_reader_drop,
             erase_fn: no_erase,
         }
@@ -92,6 +99,7 @@ impl StorageContext {
         initial_used_blocks: u32,
         reader_ctx: usize,
         read_range_fn: StorageReadRangeFn,
+        write_block_fn: StorageWriteBlockFn,
         reader_drop_fn: StorageReaderDropFn,
         erase_fn: StorageEraseFn,
     ) -> Self {
@@ -102,6 +110,7 @@ impl StorageContext {
             initial_used_blocks,
             reader_ctx,
             read_range_fn,
+            write_block_fn,
             reader_drop_fn,
             erase_fn,
         }
@@ -138,6 +147,32 @@ impl StorageContext {
 
     pub fn read_range(&self, global_offset: usize, dest: &mut [u8]) -> Result<(), StorageError> {
         (self.read_range_fn)(self.reader_ctx, global_offset, dest)
+    }
+
+    pub fn write_next_block(&mut self, data: &[u8]) -> Result<u32, StorageError> {
+        if self.mode() != StorageMode::Recorder {
+            return Err(StorageError::NotReady);
+        }
+
+        let geometry = self.geometry();
+        if data.len() != geometry.block_size_bytes as usize {
+            return Err(StorageError::InvalidAddress);
+        }
+
+        let meta = self.meta_handle();
+        let next_block = meta.used_blocks();
+        if next_block >= geometry.total_blocks() {
+            return Err(StorageError::NotReady);
+        }
+
+        meta.set_busy(true);
+        let result = (self.write_block_fn)(self.reader_ctx, next_block, data);
+        meta.set_busy(false);
+
+        result.map(|_| {
+            meta.increment_used_blocks();
+            next_block
+        })
     }
 
     pub fn block_size_bytes(&self) -> usize {
@@ -187,6 +222,7 @@ impl Drop for StorageContext {
         (self.reader_drop_fn)(self.reader_ctx);
         self.reader_ctx = 0;
         self.read_range_fn = no_reader_read;
+        self.write_block_fn = no_write_block;
         self.reader_drop_fn = no_reader_drop;
         self.erase_fn = no_erase;
     }

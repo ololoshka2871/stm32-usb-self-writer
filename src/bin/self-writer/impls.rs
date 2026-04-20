@@ -101,3 +101,24 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
 
     Ok(need_to_write)
 }
+
+pub fn halt_device(reason: &str) -> ! {
+    defmt::warn!("{}", reason);
+
+    cortex_m::interrupt::disable();
+    cortex_m::interrupt::free(|_| {
+        unsafe {
+            (*stm32l4xx_hal::pac::PWR::ptr())
+                .cr1
+                .modify(|_, w| w.lpms().bits(0b100));
+        }
+
+        let mut cp = unsafe { cortex_m::Peripherals::steal() };
+        cp.SCB.set_sleepdeep();
+        cortex_m::asm::wfi();
+    });
+
+    loop {
+        cortex_m::asm::wfi();
+    }
+}

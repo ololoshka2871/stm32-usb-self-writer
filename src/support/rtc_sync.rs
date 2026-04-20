@@ -21,6 +21,11 @@ impl<M: Monotonic<Duration = config::Duration>> RtcSync<M> {
         }
     }
 
+    pub async fn safe_wait(&self) {
+        self.rtc_event.wait().await;
+        M::delay(config::Duration::from_ticks(1)).await;
+    }
+
     pub async fn delay_sync(&self, duration: M::Duration) {
         let now = M::now();
         self.rtc_event.wait().await;

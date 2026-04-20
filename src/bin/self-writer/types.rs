@@ -50,25 +50,6 @@ pub type Flash1Io1 = PE12<Alternate<PushPull, 10>>;
 pub type Flash1Io1 = PB1<Alternate<PushPull, 10>>;
 
 #[cfg(not(feature = "no-flash"))]
-pub type Flash1 = qspi_stm32lx3::qspi::Qspi<(
-    PA3<Alternate<PushPull, 10>>,
-    PA2<Alternate<PushPull, 10>>,
-    Flash1Io1,
-    PB0<Alternate<PushPull, 10>>,
-    PA7<Alternate<PushPull, 10>>,
-    PA6<Alternate<PushPull, 10>>,
-)>;
-// TODO: add support 2 channels
-//#[cfg(not(feature = "no-flash"))]
-//pub type Flash2 = qspi_stm32lx3::qspi::Qspi<(
-//    PA3<Alternate<PushPull, 10>>,
-//    PD3<Alternate<PushPull, 10>>,
-//    PD4<Alternate<PushPull, 10>>,
-//    PD5<Alternate<PushPull, 10>>,
-//    PD6<Alternate<PushPull, 10>>,
-//    PD7<Alternate<PushPull, 10>>,
-//)>;
-#[cfg(not(feature = "no-flash"))]
 pub type FlashResetPin = PD11<Output<PushPull>>;
 
 pub type Led = PC10<Output<PushPull>>;
@@ -87,3 +68,7 @@ pub type MasterCounter =
     stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::MasterCounter16;
 pub type MasterCounterType =
     stm32_usb_self_writer::sensors::freqmeter::master_counter::m_tim6::Type;
+
+//-----------------------------------------------------------------------------
+
+pub type DatItem = (stm32_usb_self_writer::workmodes::FChannel, Option<f64>);

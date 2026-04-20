@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 
 use defmt_rtt as _; // global logger
 use panic_abort as _;
+use self_recorder_packet::{DataBlockPacker, PushResult};
 
 use stm32l4xx_hal::{
     dma::dma1,
@@ -29,7 +30,11 @@ use stm32_usb_self_writer::{
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,
-    support::{crc::STM32L4Crc32, usb_periph::UsbPeriph},
+    support::{
+        crc::{STM32L4Crc32, ZlibCompantCrc32},
+        usb_periph::UsbPeriph,
+    },
+    workmodes::FChannel,
 };
 
 use init::*;
@@ -53,6 +58,8 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP, FLASH])]
 mod app {
+    use stm32_usb_self_writer::support::crc::STM32L4Crc32Handler;
+
     use super::*;
 
     #[shared]
@@ -60,10 +67,11 @@ mod app {
         led: types::Led,
         rtc: RtcService,
         base_period: config::Duration,
-        start_delay: config::Duration,
         f1_base_period_devider: u32,
         f2_base_period_devider: u32,
         rtc_sync: RtcSync<Mono>,
+
+        analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
 
         master_counter_freq: stm32l4xx_hal::time::Hertz,
 
@@ -74,7 +82,7 @@ mod app {
         f2_capturer: Capturer<TIM2, { ExtInputType::TI1FP1 as u8 }>,
 
         settings: settings::SettingsManagerType,
-        flash_policy: settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32>,
+        flash_policy: settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32Handler>,
 
         usb_dev: usb_device::device::UsbDevice<'static, stm32_usbd::UsbBus<UsbPeriph>>,
         scsi: usbd_scsi::Scsi<
@@ -90,7 +98,8 @@ mod app {
 
     #[local]
     struct Local {
-        analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
+        crc_handler: STM32L4Crc32Handler,
+
         storage_meta: stm32_usb_self_writer::main_data_storage::StorageMetaHandle,
         storage_meta_usb: stm32_usb_self_writer::main_data_storage::StorageMetaHandle,
         storage_erase: stm32_usb_self_writer::main_data_storage::StorageEraseHandle,
@@ -111,6 +120,13 @@ mod app {
         protobuf_input_tx: Sender<'static, Vec<u8>, 4>,
         protobuf_output_tx: Sender<'static, Vec<u8>, 1>,
         protobuf_output_rx: Receiver<'static, Vec<u8>, 1>,
+
+        self_writer_data_tx: Sender<'static, types::DatItem, 32>,
+        self_writer_data_rx: Receiver<'static, types::DatItem, 32>,
+
+        prepare_delay: config::Duration,
+
+        storage_context: Option<stm32_usb_self_writer::main_data_storage::StorageContext>,
     }
 
     #[init]
@@ -147,8 +163,13 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.hclk().0);
         defmt::info!("\tSysTick");
 
-        let (settings, flash_policy, base_period, mut start_delay, write_config) =
-            init_settings(flash, dp.CRC, &mut rcc, high_perf_mode);
+        let crc = {
+            let crc = STM32L4Crc32::new(dp.CRC.constrain(&mut rcc.ahb1));
+            cortex_m::singleton!(: STM32L4Crc32 = crc).unwrap()
+        };
+
+        let (settings, flash_policy, base_period, start_delay, write_config) =
+            init_settings(flash, unsafe { crc.make_handler() }, high_perf_mode);
 
         let rtc = init_rtc_service(
             base_period,
@@ -291,7 +312,7 @@ mod app {
         let storage_meta_usb = storage_meta;
         let storage_erase = storage_context.erase_handle();
 
-        let (usb_dev, scsi, serial, storage_context) = init_usb(
+        let (usb_dev, scsi, serial, mut storage_context) = init_usb(
             fast_mode,
             UsbPeriph {
                 usb: dp.USB,
@@ -316,8 +337,10 @@ mod app {
             storage_context,
         );
 
-        if let Some(_storage_context) = storage_context {
-            // TODO: init self-writer context
+        if !high_perf_mode {
+            if let Some(storage_context) = storage_context.as_mut() {
+                storage_context.set_mode(stm32_usb_self_writer::main_data_storage::StorageMode::Recorder);
+            }
         }
 
         // test flash memory-maped read hack
@@ -349,6 +372,9 @@ mod app {
         let (protobuf_input_tx, protobuf_input_rx) = rtic_sync::make_channel!(Vec<u8>, 4);
         let (protobuf_output_tx, protobuf_output_rx) = rtic_sync::make_channel!(Vec<u8>, 1);
 
+        let (self_writer_data_tx, self_writer_data_rx) =
+            rtic_sync::make_channel!(types::DatItem, 32);
+
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
             &mut gpioc.otyper,
@@ -358,9 +384,7 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        if high_perf_mode {
-            start_delay = config::Duration::secs(2);
-
+        let prepare_delay = if high_perf_mode {
             sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
             sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
             calc_results::spawn().expect("Failed to spawn calc_results task");
@@ -368,9 +392,20 @@ mod app {
             usb_task::spawn().expect("Failed to spawn usb_task task");
             protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
             read_analog::spawn().expect("Failed to spawn read_analog task");
+
+            config::Duration::secs(0)
         } else {
             self_writer_signal::spawn().expect("Failed to spawn self_writer_signal task");
-        }
+
+            let blink_delay =
+                config::Duration::millis(config::START_BLINK_PERIOD_MS) * config::START_BLINK_COUNT;
+
+            if start_delay > blink_delay {
+                start_delay - blink_delay
+            } else {
+                config::Duration::secs(0)
+            }
+        };
 
         defmt::info!("Tasks spawned");
 
@@ -382,10 +417,11 @@ mod app {
 
                 rtc,
                 base_period,
-                start_delay,
                 f1_base_period_devider: write_config.p_write_devider,
                 f2_base_period_devider: write_config.t_write_devider,
                 rtc_sync: RtcSync::<Mono>::new(base_period),
+
+                analog_sens,
 
                 master_counter_freq,
 
@@ -406,7 +442,8 @@ mod app {
                 output_storage: Default::default(),
             },
             Local {
-                analog_sens,
+                crc_handler: unsafe { crc.make_handler() },
+
                 storage_meta,
                 storage_meta_usb,
                 storage_erase,
@@ -427,6 +464,13 @@ mod app {
                 protobuf_input_tx,
                 protobuf_output_tx,
                 protobuf_output_rx,
+
+                self_writer_data_tx,
+                self_writer_data_rx,
+
+                prepare_delay,
+
+                storage_context,
             },
         )
     }
@@ -498,7 +542,6 @@ mod app {
             &master_counter_freq,
             &rtc_sync,
             &base_period, &f1_base_period_devider,
-            &start_delay,
             rtc,
             output_storage
         ],
@@ -509,7 +552,6 @@ mod app {
         stm32_usb_self_writer::freqmeter!(
             channel = InputChannel::Ch1,
             output_storage = ctx.shared.output_storage,
-            start_delay = *ctx.shared.start_delay,
             rtc = ctx.shared.rtc,
             rtc_sync = ctx.shared.rtc_sync,
             base_period = *ctx.shared.base_period,
@@ -530,7 +572,6 @@ mod app {
             &master_counter_freq,
             &rtc_sync,
             &base_period, &f2_base_period_devider,
-            &start_delay,
             rtc,
             output_storage
         ],
@@ -541,7 +582,6 @@ mod app {
         stm32_usb_self_writer::freqmeter!(
             channel = InputChannel::Ch2,
             output_storage = ctx.shared.output_storage,
-            start_delay = *ctx.shared.start_delay,
             rtc = ctx.shared.rtc,
             rtc_sync = ctx.shared.rtc_sync,
             base_period = *ctx.shared.base_period,
@@ -820,16 +860,16 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage, &base_period], local = [analog_sens], priority = 2)]
+    #[task(shared = [output_storage, &base_period, analog_sens], priority = 2)]
     async fn read_analog(ctx: read_analog::Context) {
-        let analog_sens = ctx.local.analog_sens;
         let base_period = *ctx.shared.base_period;
 
+        let mut analog_sens = ctx.shared.analog_sens;
         let mut output_storage = ctx.shared.output_storage;
 
         defmt::info!("Regular test task");
         loop {
-            let (vbat, tcpu, v_bat_raw, v_tewmp_raw) = analog_sens.read();
+            let (vbat, tcpu, v_bat_raw, v_tewmp_raw) = analog_sens.lock(|sens| sens.read());
             defmt::trace!(
                 "Analog read: vbat = {} V, tcpu = {} °C, v_bat_raw = {}, t_cpu_raw = {}",
                 vbat,
@@ -845,13 +885,188 @@ mod app {
         }
     }
 
-    #[task(shared = [led, &start_delay], priority = 2)]
+    #[task(
+        shared = [
+            &rtc_sync,
+            &f1_base_period_devider,
+            &f2_base_period_devider,
+            output_storage
+        ],
+        local = [
+            self_writer_data_tx
+        ],  
+        priority = 4
+    )]
+    async fn self_writer_data_catcher(ctx: self_writer_data_catcher::Context) {
+        let rtc_sync = ctx.shared.rtc_sync;
+        let f1_base_period_devider = *ctx.shared.f1_base_period_devider;
+        let f2_base_period_devider = *ctx.shared.f2_base_period_devider;
+        let self_writer_data_tx = ctx.local.self_writer_data_tx;
+
+        let mut output_storage = ctx.shared.output_storage;
+
+        let mut f1_devider = f1_base_period_devider;
+        let mut f2_devider = f2_base_period_devider;
+
+        loop {
+            rtc_sync.safe_wait().await;
+            f1_devider -= 1;
+            f2_devider -= 1;
+
+            if f1_devider == 0 {
+                f1_devider = f1_base_period_devider;
+                let f = output_storage.lock(|storage| {
+                    storage.frequencys[FChannel::Pressure as usize]
+                });
+
+                if self_writer_data_tx.send((FChannel::Pressure, f)).await.is_err() {
+                    defmt::error!("Failed to send Pressure data");
+                }
+            }
+
+            if f2_devider == 0 {
+                f2_devider = f2_base_period_devider;
+                let f = output_storage.lock(|storage| {
+                    storage.frequencys[FChannel::Temperature as usize]
+                });
+                if self_writer_data_tx.send((FChannel::Temperature, f)).await.is_err() {
+                    defmt::error!("Failed to send Temperature data");
+                }
+            }
+        }
+    }
+
+    #[task(
+        shared = [rtc, analog_sens, output_storage, settings], 
+        local = [self_writer_data_rx, storage_context, crc_handler], 
+        priority = 1
+    )]
+    async fn self_writer_packer(ctx: self_writer_packer::Context) {
+        let mut analog_sens = ctx.shared.analog_sens;
+        let mut output_storage = ctx.shared.output_storage;
+        let mut settings = ctx.shared.settings;
+        let mut rtc = ctx.shared.rtc;
+
+        let self_writer_data_rx = ctx.local.self_writer_data_rx;
+        let storage_context = ctx.local.storage_context.as_mut().unwrap();
+        let crc_handler = ctx.local.crc_handler;
+
+        let initial_block_id = storage_context.used_blocks();
+        let (f_ref, write_config) = settings.lock(|settings| {
+            let settings = settings.ref_mut().0;
+            (settings.fref as f32, settings.write_config)
+        });
+
+        let mut last_success_result = [0.0f64; 2];
+        let mut prevs = [0i32; 2];
+        let mut current_block = Option::<DataBlockPacker>::None;
+
+        let mut finalize_block = move |packer: DataBlockPacker| {
+            packer.to_result_full(|data| {
+                crc_handler.reset();
+                crc_handler.feed(data);
+                crc_handler.result()
+            })
+        };
+
+        loop {
+            if current_block.is_none() {
+                let next_block_id = storage_context.used_blocks();
+                if next_block_id >= storage_context.total_blocks() {
+                    impls::halt_device("Self-writer storage is full, entering shutdown mode");
+                }
+
+                let (targets, analog_values) = (
+                    output_storage.lock(|storage| storage.targets),
+                    analog_sens.lock(|sens| sens.read()),
+                );
+
+                let prev_block_id = if next_block_id == initial_block_id {
+                    next_block_id
+                } else {
+                    next_block_id.saturating_sub(1)
+                };
+
+                let packer = DataBlockPacker::builder()
+                    .set_ids(prev_block_id, next_block_id)
+                    .set_timestamp(rtc.lock(|rtc| rtc.current_time()).into())
+                    .set_fref(f_ref)
+                    .set_targets(targets)
+                    .set_write_cfg(
+                        write_config.base_interval_ms,
+                        [write_config.p_write_devider, write_config.t_write_devider],
+                    )
+                    .set_tcpu(analog_values.1)
+                    .set_vbat(analog_values.0)
+                    .set_size(config::STORAGE_BLOCK_SIZE_BYTES as usize)
+                    .build();
+
+                current_block.replace(packer);
+            }
+
+            match self_writer_data_rx.recv().await {
+                Ok((channel, value)) => {
+                    last_success_result[channel as usize] = value.unwrap_or_default();
+                    let packer = current_block.as_mut().unwrap();
+                    let diff = if let Some(value) = value {
+                        let fixed_point_value = (value * 10_000.0) as i32;
+                        let diff = fixed_point_value - prevs[channel as usize];
+                        prevs[channel as usize] = fixed_point_value;
+                        diff
+                    } else {
+                        0
+                    };
+
+                    match packer.push_val(diff) {
+                        PushResult::Success => {}
+                        PushResult::Full => {
+                            let packer = current_block.take().unwrap();
+                            let data = finalize_block(packer).unwrap_or_else(|| {
+                                impls::halt_device("Failed to finalize self-writer block");
+                            });
+                            
+                            match storage_context.write_next_block(data.as_slice()) {
+                                Ok(block_id) => {
+                                    defmt::info!(
+                                        "Self-writer block {} stored ({} bytes)",
+                                        block_id,
+                                        data.len()
+                                    );
+                                }
+                                Err(e) => {
+                                    defmt::error!(
+                                        "Self-writer block write failed: {}",
+                                        defmt::Debug2Format(&e)
+                                    );
+                                    impls::halt_device("Self-writer storage write failed, entering shutdown mode");
+                                }
+                            }
+                            
+                            if storage_context.used_blocks() >= storage_context.total_blocks() {
+                                impls::halt_device("Self-writer storage is full, entering shutdown mode");
+                            }
+                        }
+                        PushResult::Overflow => {
+                            impls::halt_device("Self-writer block packer overflowed, entering shutdown mode");
+                        }
+                        PushResult::Finished => {
+                            impls::halt_device("Self-writer packer entered invalid finished state");
+                        }
+                    }
+                }
+                Err(_) => {
+                    defmt::panic!("Self-writer data channel closed");
+                }
+            }
+        }
+    }
+
+    #[task(shared = [led], local = [prepare_delay], priority = 2)]
     async fn self_writer_signal(ctx: self_writer_signal::Context) {
         let mut led = ctx.shared.led;
-        let start_delay = *ctx.shared.start_delay;
+        let mut prepare_delay = *ctx.local.prepare_delay;
 
         defmt::info!("+ Startup Signal +");
-        Mono::delay(config::Duration::secs(2)).await;
         for _ in 0..config::START_BLINK_COUNT {
             led.lock(|led| led.set_state(config::LED_ENABLE));
             Mono::delay(config::Duration::millis(config::START_BLINK_PERIOD_MS / 2)).await;
@@ -859,13 +1074,23 @@ mod app {
             Mono::delay(config::Duration::millis(config::START_BLINK_PERIOD_MS / 2)).await;
         }
 
+        if prepare_delay
+            > config::Duration::millis(config::START_BLINK_PERIOD_MS * config::START_BLINK_COUNT)
+        {
+            prepare_delay -=
+                config::Duration::millis(config::START_BLINK_PERIOD_MS * config::START_BLINK_COUNT);
+            defmt::info!(
+                "Startup signal done, measuring will start after {} seconds",
+                prepare_delay.to_secs()
+            );
+            Mono::delay(prepare_delay).await;
+        }
+
+        defmt::info!("Starting measurements...");
         sync_freqmeter1::spawn().expect("Failed to spawn sync_freqmeter1 task");
         sync_freqmeter2::spawn().expect("Failed to spawn sync_freqmeter2 task");
-
-        defmt::info!(
-            "Startup signal done, measuring will start after {} seconds",
-            start_delay.to_secs()
-        );
+        self_writer_data_catcher::spawn().expect("Failed to spawn self_writer task");
+        self_writer_packer::spawn().expect("Failed to spawn self_writer_packer task");
     }
 
     #[task(local = [storage_erase], priority = 1)]

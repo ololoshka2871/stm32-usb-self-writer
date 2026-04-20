@@ -78,7 +78,6 @@ macro_rules! freqmeter {
     (
         channel=$channel:expr,
         output_storage=$output_storage:expr,
-        start_delay=$start_delay:expr,
         rtc=$rtc:expr,
         rtc_sync=$rtc_sync:expr,
         base_period=$base_period:expr,
@@ -94,7 +93,6 @@ macro_rules! freqmeter {
             FreqmeterDmaChannelExt, FreqmeterStates, calc_new_target, calc_result,
         };
 
-        let start_delay = $start_delay;
         let f_ref = $f_ref;
 
         let power_pin: &mut dyn stm32_usb_self_writer::PowerCtrl = $power_pin;
@@ -106,7 +104,7 @@ macro_rules! freqmeter {
         let mut rtc = $rtc;
         let rtc_sync = $rtc_sync;
 
-        let mut current_state = FreqmeterStates::<$mono>::init(start_delay);
+        let mut current_state = FreqmeterStates::<$mono>::init_now();
         loop {
             match current_state {
                 FreqmeterStates::PowerOff { deadline } => {

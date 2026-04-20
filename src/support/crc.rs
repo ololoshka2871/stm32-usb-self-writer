@@ -22,6 +22,10 @@ impl STM32L4Crc32 {
 
         Self(configured_crc)
     }
+
+    pub unsafe fn make_handler(&'static self) -> STM32L4Crc32Handler {
+        STM32L4Crc32Handler(self as *const _ as *mut _)
+    }
 }
 
 impl ZlibCompantCrc32 for STM32L4Crc32 {
@@ -38,3 +42,23 @@ impl ZlibCompantCrc32 for STM32L4Crc32 {
         !self.0.peek_result()
     }
 }
+
+//-----------------------------------------------------------------------------
+
+pub struct STM32L4Crc32Handler(*mut STM32L4Crc32);
+
+impl ZlibCompantCrc32 for STM32L4Crc32Handler {
+    fn reset(&mut self) {
+        unsafe { (&mut *self.0).reset() }
+    }
+
+    fn feed(&mut self, data: &[u8]) {
+        unsafe { (&mut *self.0).feed(data) }
+    }
+
+    fn result(&self) -> u32 {
+        unsafe { (&mut *self.0).result() }
+    }
+}
+
+unsafe impl Send for STM32L4Crc32Handler {}

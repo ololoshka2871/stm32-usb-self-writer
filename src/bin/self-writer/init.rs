@@ -4,11 +4,15 @@ use qspi_stm32lx3::{
     qspi_shared_channel::QspiSharedChannel,
     stm32l4x3::QUADSPI,
 };
-use stm32_usb_self_writer::main_data_storage::{StorageContext, StorageMode};
-use stm32_usb_self_writer::{config, sensors::analog::AnalogSensor, settings};
+use stm32_usb_self_writer::{
+    clocking::ClockConfigProvider,
+    config,
+    main_data_storage::{StorageContext, StorageMode},
+    sensors::analog::AnalogSensor,
+    settings,
+};
 use stm32l4xx_hal::{
     adc,
-    crc::CrcExt,
     flash,
     gpio::{Analog, gpioa::PA1},
     pac,
@@ -18,7 +22,6 @@ use stm32l4xx_hal::{
     time::Hertz,
 };
 
-use stm32_usb_self_writer::{clocking::ClockConfigProvider, support::crc::STM32L4Crc32};
 use usb_device::bus::UsbBusAllocator;
 use usbd_serial::CdcAcmClass;
 
@@ -50,20 +53,18 @@ pub fn init_clocks(
     res
 }
 
-pub fn init_settings(
+pub fn init_settings<CRC: stm32_usb_self_writer::support::crc::ZlibCompantCrc32>(
     flash: flash::Parts,
-    crc: pac::CRC,
-    rcc: &mut rcc::Rcc,
+    crc: CRC,
     high_perf_mode: bool,
 ) -> (
     settings::SettingsManagerType,
-    settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32>,
+    settings::FlasRWPolcy<settings::AppSettings, CRC>,
     config::Duration,
     config::Duration,
     settings::WriteConfig,
 ) {
-    let (mut settings, flash_policy) =
-        settings::init(flash, STM32L4Crc32::new(crc.constrain(&mut rcc.ahb1)));
+    let (mut settings, flash_policy) = settings::init(flash, crc);
     let config = settings.ref_mut().0;
     let write_config = config.write_config.clone();
 

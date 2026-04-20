@@ -49,6 +49,12 @@ impl<M: Monotonic<Duration = config::Duration>> FreqmeterStates<M> {
         }
     }
 
+    pub fn init_now() -> Self {
+        Self::Preheating {
+            deadline: M::now() + Self::MIN_COLD_STARTUP_TIME,
+        }
+    }
+
     pub fn plan_next_state(
         prev_deadline: M::Instant,
         base_period: M::Duration,
