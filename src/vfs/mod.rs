@@ -178,7 +178,12 @@ impl EMfatStorage {
     pub fn set_settings_accessor(&mut self, accessor: Box<SettingsAccessor>) {
         self.settings_accessor.borrow_mut().replace(accessor);
     }
+
+    pub fn process_pending_erase(&mut self) -> Result<bool, crate::main_data_storage::StorageError> {
+        self.storage_context.process_pending_erase()
+    }
 }
+
 
 impl BlockDevice for EMfatStorage {
     const BLOCK_BYTES: usize = 512;

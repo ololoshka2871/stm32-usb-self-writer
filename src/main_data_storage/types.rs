@@ -8,6 +8,44 @@ pub enum StorageMode {
 
 pub type StorageReadRangeFn = fn(usize, usize, &mut [u8]) -> Result<(), StorageError>;
 pub type StorageReaderDropFn = fn(usize);
+pub type StorageEraseFn = fn(usize) -> Result<(), StorageError>;
+
+#[derive(Clone, Copy)]
+pub struct StorageEraseHandle {
+    meta: StorageMetaHandle,
+    reader_ctx: usize,
+    erase_fn: StorageEraseFn,
+}
+
+impl StorageEraseHandle {
+    pub fn has_pending_request(self) -> bool {
+        self.meta.is_erase_requested()
+    }
+
+    pub fn is_in_progress(self) -> bool {
+        self.meta.erase_in_progress()
+    }
+
+    pub fn process_pending_erase(self) -> Result<bool, StorageError> {
+        if !self.meta.take_erase_request() {
+            return Ok(false);
+        }
+
+        self.meta.set_erase_in_progress(true);
+        self.meta.set_busy(true);
+        let erase_result = (self.erase_fn)(self.reader_ctx);
+        self.meta.set_busy(false);
+        self.meta.set_erase_in_progress(false);
+
+        match erase_result {
+            Ok(()) => {
+                self.meta.reset_used_blocks();
+                Ok(true)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
 
 fn no_reader_read(
     _reader_ctx: usize,
@@ -19,6 +57,10 @@ fn no_reader_read(
 
 fn no_reader_drop(_reader_ctx: usize) {}
 
+fn no_erase(_reader_ctx: usize) -> Result<(), StorageError> {
+    Err(StorageError::NotReady)
+}
+
 pub struct StorageContext {
     mode: StorageMode,
     geometry: StorageGeometry,
@@ -27,10 +69,11 @@ pub struct StorageContext {
     reader_ctx: usize,
     read_range_fn: StorageReadRangeFn,
     reader_drop_fn: StorageReaderDropFn,
+    erase_fn: StorageEraseFn,
 }
 
 impl StorageContext {
-    pub fn new_without_reader(mode: StorageMode, geometry: StorageGeometry) -> Self {
+    pub fn new_empty(mode: StorageMode, geometry: StorageGeometry) -> Self {
         Self {
             mode,
             geometry,
@@ -39,16 +82,18 @@ impl StorageContext {
             reader_ctx: 0,
             read_range_fn: no_reader_read,
             reader_drop_fn: no_reader_drop,
+            erase_fn: no_erase,
         }
     }
 
-    pub fn new_with_reader(
+    pub fn new(
         mode: StorageMode,
         geometry: StorageGeometry,
         initial_used_blocks: u32,
         reader_ctx: usize,
         read_range_fn: StorageReadRangeFn,
         reader_drop_fn: StorageReaderDropFn,
+        erase_fn: StorageEraseFn,
     ) -> Self {
         Self {
             mode,
@@ -58,6 +103,7 @@ impl StorageContext {
             reader_ctx,
             read_range_fn,
             reader_drop_fn,
+            erase_fn,
         }
     }
 
@@ -122,6 +168,18 @@ impl StorageContext {
             .map(|meta| meta.erase_in_progress())
             .unwrap_or(false)
     }
+
+    pub fn process_pending_erase(&mut self) -> Result<bool, StorageError> {
+        self.erase_handle().process_pending_erase()
+    }
+
+    pub fn erase_handle(&mut self) -> StorageEraseHandle {
+        StorageEraseHandle {
+            meta: self.meta_handle(),
+            reader_ctx: self.reader_ctx,
+            erase_fn: self.erase_fn,
+        }
+    }
 }
 
 impl Drop for StorageContext {
@@ -130,6 +188,7 @@ impl Drop for StorageContext {
         self.reader_ctx = 0;
         self.read_range_fn = no_reader_read;
         self.reader_drop_fn = no_reader_drop;
+        self.erase_fn = no_erase;
     }
 }
 

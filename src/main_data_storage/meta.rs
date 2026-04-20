@@ -112,6 +112,11 @@ impl StorageMetaHandle {
         }
     }
 
+    #[inline]
+    pub fn is_erase_requested(self) -> bool {
+        self.state().erase_requested.load(Ordering::Acquire)
+    }
+
     pub fn take_erase_request(self) -> bool {
         self.state()
             .erase_requested

@@ -51,7 +51,7 @@ static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
 //-----------------------------------------------------------------------------
 
-#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP])]
+#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP, FLASH])]
 mod app {
     use super::*;
 
@@ -92,6 +92,8 @@ mod app {
     struct Local {
         analog_sens: stm32_usb_self_writer::sensors::analog::AnalogSensor<types::VBatPin>,
         storage_meta: stm32_usb_self_writer::main_data_storage::StorageMetaHandle,
+        storage_meta_usb: stm32_usb_self_writer::main_data_storage::StorageMetaHandle,
+        storage_erase: stm32_usb_self_writer::main_data_storage::StorageEraseHandle,
 
         master_timer: types::MasterCounter,
         f1_power_pin: PD13<Output<PushPull>>,
@@ -286,6 +288,8 @@ mod app {
         };
 
         let storage_meta = storage_context.meta_handle();
+        let storage_meta_usb = storage_meta;
+        let storage_erase = storage_context.erase_handle();
 
         let (usb_dev, scsi, serial, storage_context) = init_usb(
             fast_mode,
@@ -404,6 +408,8 @@ mod app {
             Local {
                 analog_sens,
                 storage_meta,
+                storage_meta_usb,
+                storage_erase,
 
                 master_timer,
 
@@ -427,7 +433,7 @@ mod app {
 
     //-------------------------------------------------------------------------
 
-    #[task(binds = TIM6_DAC, local = [master_timer], priority = 6)]
+    #[task(binds = TIM6_DAC, local = [master_timer], priority = 7)]
     fn master_timer_ovf(ctx: master_timer_ovf::Context) {
         unsafe { ctx.local.master_timer.overflow_isr() };
     }
@@ -436,7 +442,7 @@ mod app {
         binds=DMA1_CH6,
         shared = [transfer_fin1, f1_capturer],
         local = [f1_capture_buffer, f1_capture_tx],
-        priority = 4)
+        priority = 5)
     ]
     fn f1_dma_transfer_complete(mut ctx: f1_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
@@ -452,7 +458,7 @@ mod app {
         binds=DMA1_CH2,
         shared = [transfer_fin2, f2_capturer],
         local = [f2_capture_buffer, f2_capture_tx],
-        priority = 4)
+        priority = 5)
     ]
     fn f2_dma_transfer_complete(mut ctx: f2_dma_transfer_complete::Context) {
         stm32_usb_self_writer::freqmeter_dma_interrupt!(
@@ -464,13 +470,13 @@ mod app {
         );
     }
 
-    #[task(binds = USB_FS, shared = [&usb_notify], priority = 1)]
+    #[task(binds = USB_FS, shared = [&usb_notify], priority = 2)]
     fn usb_fs(ctx: usb_fs::Context) {
         ctx.shared.usb_notify.notify_one();
     }
 
     // Приоритет строго равен sync_freqmeter*, иначе Deadlock на мьютексе rtc_sync
-    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 3)]
+    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 4)]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
         let rtc_sync = ctx.shared.rtc_sync;
@@ -497,7 +503,7 @@ mod app {
             output_storage
         ],
         local = [f1_capture_rx, f1_power_pin],
-        priority = 3,
+        priority = 4,
     )]
     async fn sync_freqmeter1(mut ctx: sync_freqmeter1::Context) {
         stm32_usb_self_writer::freqmeter!(
@@ -529,7 +535,7 @@ mod app {
             output_storage
         ],
         local = [f2_capture_rx, f2_power_pin],
-        priority = 3,
+        priority = 4,
     )]
     async fn sync_freqmeter2(mut ctx: sync_freqmeter2::Context) {
         stm32_usb_self_writer::freqmeter!(
@@ -549,7 +555,7 @@ mod app {
         );
     }
 
-    #[task(shared = [&base_period, output_storage, settings], priority = 2)]
+    #[task(shared = [&base_period, output_storage, settings], priority = 3)]
     async fn calc_results(ctx: calc_results::Context) {
         use stm32_usb_self_writer::{
             support::condition_monitor::{ConditionMonitor, Ordering},
@@ -632,7 +638,7 @@ mod app {
 
     #[task(
         shared = [settings, flash_policy],
-        priority = 1,
+        priority = 2,
     )]
     async fn settings_saver(ctx: settings_saver::Context) {
         use flash_settings_rs::StoragePolicy;
@@ -662,8 +668,9 @@ mod app {
         local = [
             protobuf_input_tx,
             protobuf_output_rx,
+            storage_meta_usb,
         ],
-        priority = 1
+        priority = 2
     )]
     async fn usb_task(ctx: usb_task::Context) {
         use alloc::boxed::Box;
@@ -678,6 +685,7 @@ mod app {
 
         let protobuf_input_tx = ctx.local.protobuf_input_tx;
         let protobuf_output_rx = ctx.local.protobuf_output_rx;
+        let storage_meta_usb = *ctx.local.storage_meta_usb;
 
         defmt::info!("USB task started");
 
@@ -706,6 +714,12 @@ mod app {
             led.lock(|led| led.set_state(config::LED_ENABLE));
 
             wait = long_wait; // default response
+
+            if storage_meta_usb.is_erase_requested() && !storage_meta_usb.erase_in_progress() {
+                if let Err(_) = flash_erase::spawn() {
+                    // already queued/running
+                }
+            }
 
             // Важно! Список передаваемый сюда в том же порядке,
             // что были инициализированы интерфейсы
@@ -751,7 +765,7 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 1)]
+    #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 2)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
         let mut output_storage = ctx.shared.output_storage;
@@ -806,7 +820,7 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage, &base_period], local = [analog_sens], priority = 1)]
+    #[task(shared = [output_storage, &base_period], local = [analog_sens], priority = 2)]
     async fn read_analog(ctx: read_analog::Context) {
         let analog_sens = ctx.local.analog_sens;
         let base_period = *ctx.shared.base_period;
@@ -831,7 +845,7 @@ mod app {
         }
     }
 
-    #[task(shared = [led, &start_delay], priority = 1)]
+    #[task(shared = [led, &start_delay], priority = 2)]
     async fn self_writer_signal(ctx: self_writer_signal::Context) {
         let mut led = ctx.shared.led;
         let start_delay = *ctx.shared.start_delay;
@@ -852,5 +866,15 @@ mod app {
             "Startup signal done, measuring will start after {} seconds",
             start_delay.to_secs()
         );
+    }
+
+    #[task(local = [storage_erase], priority = 1)]
+    async fn flash_erase(ctx: flash_erase::Context) {
+        let storage_erase = *ctx.local.storage_erase;
+        match storage_erase.process_pending_erase() {
+            Ok(true) => defmt::info!("Storage erase completed"),
+            Ok(false) => (),
+            Err(e) => defmt::error!("Storage erase failed: {}", defmt::Debug2Format(&e)),
+        }
     }
 }

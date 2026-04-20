@@ -21,7 +21,7 @@ where
         geometry.validate()?;
 
         let mapper = BlockMapper::new(geometry);
-        let mut context = StorageContext::new_without_reader(mode, geometry);
+        let mut context = StorageContext::new_empty(mode, geometry);
         let _ = context.meta_handle();
 
         Ok(Self {
@@ -99,23 +99,6 @@ where
     }
 
     pub fn process_pending_erase(&mut self) -> Result<bool, StorageError> {
-        let meta = self.context.meta_handle();
-        if !meta.take_erase_request() {
-            return Ok(false);
-        }
-
-        meta.set_erase_in_progress(true);
-        meta.set_busy(true);
-        let erase_result = self.backend.erase_all();
-        meta.set_busy(false);
-        meta.set_erase_in_progress(false);
-
-        match erase_result {
-            Ok(()) => {
-                meta.reset_used_blocks();
-                Ok(true)
-            }
-            Err(e) => Err(e),
-        }
+        self.context.process_pending_erase()
     }
 }

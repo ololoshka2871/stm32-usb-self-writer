@@ -382,8 +382,6 @@ macro_rules! freqmeter {
                         $base_period_devider,
                         None,
                     );
-
-                    // TODO: report F = Some(prev_freq)
                 }
             }
         }

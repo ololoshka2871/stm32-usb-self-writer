@@ -99,13 +99,14 @@ impl QSPIStorage {
     pub fn into_context(self, mode: StorageMode) -> StorageContext {
         let adapter_ptr = Box::into_raw(Box::new(self.adapter)) as usize;
 
-        StorageContext::new_with_reader(
+        StorageContext::new(
             mode,
             self.geometry,
             self.startup_used_blocks,
             adapter_ptr,
             read_range_from_context,
             drop_context_reader,
+            erase_from_context,
         )
     }
 }
@@ -230,6 +231,35 @@ fn read_range_from_context(
 
     let adapter = unsafe { &*(reader_ctx as *const RuntimeReadAdapter) };
     read_range_via_adapter(adapter, global_offset, dest)
+}
+
+fn erase_with_driver(driver: &RuntimeDriver) -> Result<(), StorageError> {
+    let mut guard = driver.borrow_mut();
+
+    guard.wake_up().map_err(map_qspi_error)?;
+    guard.erase().map_err(map_qspi_error)?;
+    guard.want_sleep();
+
+    Ok(())
+}
+
+fn erase_all_via_adapter(adapter: &RuntimeReadAdapter) -> Result<(), StorageError> {
+    erase_with_driver(&adapter.primary)?;
+
+    if let Some(secondary) = adapter.secondary.as_ref() {
+        erase_with_driver(secondary)?;
+    }
+
+    Ok(())
+}
+
+fn erase_from_context(reader_ctx: usize) -> Result<(), StorageError> {
+    if reader_ctx == 0 {
+        return Err(StorageError::NotReady);
+    }
+
+    let adapter = unsafe { &*(reader_ctx as *const RuntimeReadAdapter) };
+    erase_all_via_adapter(adapter)
 }
 
 fn drop_context_reader(reader_ctx: usize) {
