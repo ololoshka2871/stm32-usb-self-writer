@@ -103,7 +103,7 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
 }
 
 pub fn halt_device(reason: &str) -> ! {
-    defmt::warn!("{}", reason);
+    defmt::error!("{}", reason);
 
     cortex_m::interrupt::disable();
     cortex_m::interrupt::free(|_| {

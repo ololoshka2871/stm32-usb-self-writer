@@ -31,12 +31,12 @@ use stm32_usb_self_writer::{
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,
     support::{
-        crc::{STM32L4Crc32, ZlibCompantCrc32},
+        crc::{STM32L4Crc32, STM32L4Crc32Handler, ZlibCompantCrc32},
         usb_periph::UsbPeriph,
     },
     workmodes::FChannel,
 };
-
+    
 use init::*;
 
 //-----------------------------------------------------------------------------
@@ -54,12 +54,12 @@ defmt::timestamp!(
 
 static mut HEAP: [u8; config::HEAP_SIZE] = [0; config::HEAP_SIZE];
 
+const RES_QUEUE_SIZE: usize = 192;
+
 //-----------------------------------------------------------------------------
 
-#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP, FLASH])]
+#[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP, SWPMI1])]
 mod app {
-    use stm32_usb_self_writer::support::crc::STM32L4Crc32Handler;
-
     use super::*;
 
     #[shared]
@@ -121,8 +121,8 @@ mod app {
         protobuf_output_tx: Sender<'static, Vec<u8>, 1>,
         protobuf_output_rx: Receiver<'static, Vec<u8>, 1>,
 
-        self_writer_data_tx: Sender<'static, types::DatItem, 32>,
-        self_writer_data_rx: Receiver<'static, types::DatItem, 32>,
+        self_writer_data_tx: Sender<'static, types::DatItem, RES_QUEUE_SIZE>,
+        self_writer_data_rx: Receiver<'static, types::DatItem, RES_QUEUE_SIZE>,
 
         prepare_delay: config::Duration,
 
@@ -373,7 +373,7 @@ mod app {
         let (protobuf_output_tx, protobuf_output_rx) = rtic_sync::make_channel!(Vec<u8>, 1);
 
         let (self_writer_data_tx, self_writer_data_rx) =
-            rtic_sync::make_channel!(types::DatItem, 32);
+            rtic_sync::make_channel!(types::DatItem, RES_QUEUE_SIZE);
 
         let led = gpioc.pc10.into_push_pull_output_in_state(
             &mut gpioc.moder,
@@ -919,7 +919,7 @@ mod app {
                     storage.frequencys[FChannel::Pressure as usize]
                 });
 
-                if self_writer_data_tx.send((FChannel::Pressure, f)).await.is_err() {
+                if self_writer_data_tx.try_send((FChannel::Pressure, f)).is_err() {
                     defmt::error!("Failed to send Pressure data");
                 }
             }
@@ -929,7 +929,7 @@ mod app {
                 let f = output_storage.lock(|storage| {
                     storage.frequencys[FChannel::Temperature as usize]
                 });
-                if self_writer_data_tx.send((FChannel::Temperature, f)).await.is_err() {
+                if self_writer_data_tx.try_send((FChannel::Temperature, f)).is_err() {
                     defmt::error!("Failed to send Temperature data");
                 }
             }
@@ -937,29 +937,28 @@ mod app {
     }
 
     #[task(
-        shared = [rtc, analog_sens, output_storage, settings], 
+        shared = [rtc, led, analog_sens, settings, &f1_base_period_devider, &f2_base_period_devider], 
         local = [self_writer_data_rx, storage_context, crc_handler], 
         priority = 1
     )]
     async fn self_writer_packer(ctx: self_writer_packer::Context) {
         let mut analog_sens = ctx.shared.analog_sens;
-        let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
         let mut rtc = ctx.shared.rtc;
+        let mut led = ctx.shared.led;
+        let f1_base_period_devider = *ctx.shared.f1_base_period_devider;
+        let f2_base_period_devider = *ctx.shared.f2_base_period_devider;
 
         let self_writer_data_rx = ctx.local.self_writer_data_rx;
         let storage_context = ctx.local.storage_context.as_mut().unwrap();
         let crc_handler = ctx.local.crc_handler;
 
-        let initial_block_id = storage_context.used_blocks();
-        let (f_ref, write_config) = settings.lock(|settings| {
-            let settings = settings.ref_mut().0;
-            (settings.fref as f32, settings.write_config)
-        });
+        let mut block_id = 0; // Всегда начинаем цепочку блоков с 0
+        let write_config = settings.lock(|settings| settings.ref_mut().0.write_config);
 
-        let mut last_success_result = [0.0f64; 2];
         let mut prevs = [0i32; 2];
-        let mut current_block = Option::<DataBlockPacker>::None;
+        let mut current_block_packer = Option::<DataBlockPacker>::None;
+        let mut channel_iterator = FChannel::iter(f1_base_period_devider, f2_base_period_devider);
 
         let mut finalize_block = move |packer: DataBlockPacker| {
             packer.to_result_full(|data| {
@@ -970,92 +969,103 @@ mod app {
         };
 
         loop {
-            if current_block.is_none() {
-                let next_block_id = storage_context.used_blocks();
-                if next_block_id >= storage_context.total_blocks() {
-                    impls::halt_device("Self-writer storage is full, entering shutdown mode");
+            if current_block_packer.is_none() {
+                let used_blocks = storage_context.used_blocks();
+                if used_blocks >= storage_context.total_blocks() {
+                    impls::halt_device("Self-writer storage is full");
                 }
 
-                let (targets, analog_values) = (
-                    output_storage.lock(|storage| storage.targets),
-                    analog_sens.lock(|sens| sens.read()),
-                );
+                let analog_values = analog_sens.lock(|sens| sens.read());
 
-                let prev_block_id = if next_block_id == initial_block_id {
-                    next_block_id
+                // блок с id=0 не имеет предыдущего блока, по этому 0
+                let prev_block_id = if block_id > 0 {
+                    block_id - 1
                 } else {
-                    next_block_id.saturating_sub(1)
+                    0
                 };
+                prevs = [0i32; 2];
+                channel_iterator.reset();
 
-                let packer = DataBlockPacker::builder()
-                    .set_ids(prev_block_id, next_block_id)
-                    .set_timestamp(rtc.lock(|rtc| rtc.current_time()).into())
-                    .set_fref(f_ref)
-                    .set_targets(targets)
-                    .set_write_cfg(
-                        write_config.base_interval_ms,
-                        [write_config.p_write_devider, write_config.t_write_devider],
-                    )
-                    .set_tcpu(analog_values.1)
-                    .set_vbat(analog_values.0)
-                    .set_size(config::STORAGE_BLOCK_SIZE_BYTES as usize)
-                    .build();
-
-                current_block.replace(packer);
+                current_block_packer = Some(
+                    DataBlockPacker::builder()
+                        .set_ids(prev_block_id, block_id)
+                        .set_timestamp(rtc.lock(|rtc| rtc.current_time()).into())
+                        .set_write_cfg(
+                            write_config.base_interval_ms,
+                            [write_config.p_write_devider, write_config.t_write_devider],
+                        )
+                        .set_tcpu(analog_values.1)
+                        .set_vbat(analog_values.0)
+                        .set_size(config::STORAGE_BLOCK_SIZE_BYTES as usize)
+                        .build(),
+                );
             }
 
-            match self_writer_data_rx.recv().await {
-                Ok((channel, value)) => {
-                    last_success_result[channel as usize] = value.unwrap_or_default();
-                    let packer = current_block.as_mut().unwrap();
-                    let diff = if let Some(value) = value {
-                        let fixed_point_value = (value * 10_000.0) as i32;
-                        let diff = fixed_point_value - prevs[channel as usize];
-                        prevs[channel as usize] = fixed_point_value;
-                        diff
-                    } else {
-                        0
-                    };
+            let packer = current_block_packer.as_mut().unwrap();
 
-                    match packer.push_val(diff) {
-                        PushResult::Success => {}
-                        PushResult::Full => {
-                            let packer = current_block.take().unwrap();
-                            let data = finalize_block(packer).unwrap_or_else(|| {
-                                impls::halt_device("Failed to finalize self-writer block");
-                            });
-                            
-                            match storage_context.write_next_block(data.as_slice()) {
-                                Ok(block_id) => {
-                                    defmt::info!(
-                                        "Self-writer block {} stored ({} bytes)",
-                                        block_id,
-                                        data.len()
-                                    );
-                                }
-                                Err(e) => {
-                                    defmt::error!(
-                                        "Self-writer block write failed: {}",
-                                        defmt::Debug2Format(&e)
-                                    );
-                                    impls::halt_device("Self-writer storage write failed, entering shutdown mode");
-                                }
-                            }
-                            
-                            if storage_context.used_blocks() >= storage_context.total_blocks() {
-                                impls::halt_device("Self-writer storage is full, entering shutdown mode");
-                            }
-                        }
-                        PushResult::Overflow => {
-                            impls::halt_device("Self-writer block packer overflowed, entering shutdown mode");
-                        }
-                        PushResult::Finished => {
-                            impls::halt_device("Self-writer packer entered invalid finished state");
-                        }
+            let (channel, value) = {
+                let await_result_channel = channel_iterator.next().unwrap();
+                loop {
+                    let (channel, value) = self_writer_data_rx
+                        .recv()
+                        .await
+                        .expect("Failed to receive data from self_writer_data_catcher task");
+                    if channel == await_result_channel {
+                        break (channel, value);
+                    } else {
+                        defmt::warn!("Received data for channel {} while waiting for {}, discarding", 
+                            channel, await_result_channel
+                        );
                     }
                 }
-                Err(_) => {
-                    defmt::panic!("Self-writer data channel closed");
+            };
+
+            #[cfg(feature = "led-blink-each-block")]
+            led.lock(|led| led.set_state(config::LED_DISABLE));
+
+            let diff = if let Some(value) = value {
+                let f_fixed = (value * config::FREQ_MULTIPLIER as f64) as i32;
+                let prev = &mut prevs[channel as usize];
+
+                let diff = f_fixed - *prev;
+                *prev = f_fixed;
+                
+                diff
+            } else {
+                0
+            };
+
+            match packer.push_val(diff) {
+                PushResult::Success => {}
+                PushResult::Full => {
+                    let packer = current_block_packer.take().unwrap();
+                    let data = finalize_block(packer).unwrap_or_else(|| {
+                        impls::halt_device("Failed to finalize block");
+                    });
+                    
+                    #[cfg(feature = "led-blink-each-block")]
+                    led.lock(|led| led.set_state(config::LED_ENABLE));
+
+                    match storage_context.write_next_block(data.as_slice()) {
+                        Ok(abs_id) => {
+                            defmt::info!("Self-writer block {} stored (abs={})", block_id, abs_id);
+                        }
+                        Err(_) => {
+                            impls::halt_device("Self-writer storage write failed");
+                        }
+                    }
+                    
+                    if storage_context.used_blocks() >= storage_context.total_blocks() {
+                        impls::halt_device("Self-writer storage is full");
+                    } else {
+                        block_id += 1;
+                    }
+                }
+                PushResult::Overflow => {
+                    impls::halt_device("Self-writer block packer overflowed");
+                }
+                PushResult::Finished => {
+                    impls::halt_device("Self-writer packer entered invalid finished state");
                 }
             }
         }

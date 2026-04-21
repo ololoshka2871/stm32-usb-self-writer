@@ -18,7 +18,7 @@ pub type Instant = rtic_monotonics::fugit::Instant<u32, 1, { SYST_TIMER_HZ }>;
 
 //-----------------------------------------------------------------------------
 
-pub const HEAP_SIZE: usize = 1024 * 8;
+pub const HEAP_SIZE: usize = 1024 * 16;
 
 //-----------------------------------------------------------------------------
 
@@ -48,6 +48,7 @@ pub const MINIMUM_ADAPTATION_INTERVAL: u32 = 50;
 pub const MEASURE_TIME_TO_GUARD_MULTIPLIER: f32 = 1.5;
 pub const MIN_GUARD_TIME: f64 = 100.0;
 pub const MEASURE_TIME_MAX_MS: u32 = 1000;
+pub const FREQ_MULTIPLIER: u32 = 10_000;
 /// Запас на которое время измерения меньше дедлайна, из него вычисляется цель
 /// Если используется DEFMT_LOG = "trace", увеличить до 10 в режиме самописца!
 pub const MAKE_MEASURE_TIME_ZAPAS_MS: u32 = 5;

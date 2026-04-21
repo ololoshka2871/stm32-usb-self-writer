@@ -118,13 +118,13 @@ pub(crate) unsafe extern "C" fn meminfo_read(
 ) {
     use serde::Serialize;
 
-    #[allow(non_snake_case)]
     #[derive(Serialize)]
+    #[serde(rename_all = "PascalCase")]
     struct MemInfo {
-        BlockSizeBytes: u32,
-        TotalBlocks: u32,
-        UsedBlocks: u32,
-        EraseInProgress: bool,
+        pub block_size_bytes: u32,
+        pub total_blocks: u32,
+        pub used_blocks: u32,
+        pub freq_multiplier: u32,
     }
 
     if userdata == 0 {
@@ -135,10 +135,10 @@ pub(crate) unsafe extern "C" fn meminfo_read(
     let storage_context = &*(userdata as *const crate::main_data_storage::StorageContext);
 
     let info = MemInfo {
-        BlockSizeBytes: storage_context.block_size_bytes() as u32,
-        TotalBlocks: storage_context.total_blocks(),
-        UsedBlocks: storage_context.used_blocks(),
-        EraseInProgress: storage_context.is_erase_in_progress(),
+        block_size_bytes: storage_context.block_size_bytes() as u32,
+        total_blocks: storage_context.total_blocks(),
+        used_blocks: storage_context.used_blocks(),
+        freq_multiplier: crate::config::FREQ_MULTIPLIER,
     };
 
     match serde_json::to_string_pretty(&info) {

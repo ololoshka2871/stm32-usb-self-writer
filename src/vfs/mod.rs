@@ -153,21 +153,17 @@ impl EMfatStorage {
 
         {
             let used = storage_context.used_size_bytes();
-            if used > 0 {
-                defmt::trace!("EmFat: /data_use.hs ({})", used);
-                res.push(
-                    EntryBuilder::new()
-                        .name(c_str!("data_use.hs"))
-                        .lvl(1)
-                        .size(used)
-                        .max_size(used)
-                        .read_cb(Some(flash_read))
-                        .user_data(used_view)
-                        .build(),
-                );
-            } else {
-                defmt::debug!("EmFat: /data_use.hs <empty-skipped>");
-            }
+            defmt::trace!("EmFat: /data_use.hs ({})", used);
+            res.push(
+                EntryBuilder::new()
+                    .name(c_str!("data_use.hs"))
+                    .lvl(1)
+                    .size(used)
+                    .max_size(used)
+                    .read_cb(Some(flash_read))
+                    .user_data(used_view)
+                    .build(),
+            );
         }
 
         res.push(EntryBuilder::terminator_entry());

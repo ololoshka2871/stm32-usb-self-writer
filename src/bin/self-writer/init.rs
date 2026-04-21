@@ -103,8 +103,9 @@ pub fn init_rtc_service(
 
     rtc.set_alarm_period_ms(base_period.to_millis() as u32);
     defmt::info!(
-        "\tRTC initialized, source: {}",
-        defmt::Debug2Format(&rtc_clock_source)
+        "\tRTC initialized, source: {}, time: {}",
+        defmt::Debug2Format(&rtc_clock_source),
+        rtc.current_time()
     );
 
     rtc
