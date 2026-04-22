@@ -8,26 +8,38 @@ pub mod output_storage;
 //pub mod processing;
 
 #[derive(Clone, Copy, Debug, PartialEq, defmt::Format)]
+#[repr(u8)]
 pub enum FChannel {
     Pressure = 0,
     Temperature = 1,
+
+    Both = 222,
 }
 
 impl FChannel {
     pub fn iter(m: u32, n: u32) -> FChannelIter {
-        FChannelIter { m, n, current: 0 }
+        assert_ne!(m, 0);
+        assert_ne!(n, 0);
+        FChannelIter {
+            m,
+            n,
+            current_m: m - 1,
+            current_n: n - 1,
+        }
     }
 }
 
 pub struct FChannelIter {
     m: u32,
     n: u32,
-    current: u32, // текущая позиция в блоке (0 = начало блока)
+    current_m: u32,
+    current_n: u32,
 }
 
 impl FChannelIter {
     pub fn reset(&mut self) {
-        self.current = 0;
+        self.current_m = self.m - 1;
+        self.current_n = self.n - 1;
     }
 }
 
@@ -35,24 +47,34 @@ impl Iterator for FChannelIter {
     type Item = FChannel;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let block_size = self.m + self.n;
+        self.current_m += 1;
+        self.current_n += 1;
 
-        if block_size == 0 {
-            // Бесконечная последовательность из P (если n=0) или T (если m=0)
-            return Some(if self.m > 0 {
-                FChannel::Pressure
-            } else {
-                FChannel::Temperature
-            });
-        }
-
-        let pos = self.current % block_size;
-        self.current += 1;
-
-        if pos < self.m {
+        if self.current_m == self.m && self.current_n == self.n {
+            self.current_m = 0;
+            self.current_n = 0;
+            Some(FChannel::Both)
+        } else if self.current_m == self.m {
+            self.current_m = 0;
             Some(FChannel::Pressure)
-        } else {
+        } else if self.current_n == self.n {
+            self.current_n = 0;
             Some(FChannel::Temperature)
+        } else {
+            None
+        }
+    }
+}
+
+pub trait ChannelChecker {
+    fn check(&self, channel: FChannel) -> bool;
+}
+
+impl ChannelChecker for Option<FChannel> {
+    fn check(&self, channel: FChannel) -> bool {
+        match self {
+            Some(c) => *c == channel,
+            None => false,
         }
     }
 }

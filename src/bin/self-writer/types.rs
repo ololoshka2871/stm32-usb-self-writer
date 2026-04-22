@@ -6,7 +6,7 @@ use stm32l4xx_hal::gpio::{
     PE12, PushPull,
 };
 
-use stm32_usb_self_writer::{clocking::*, config};
+use stm32_usb_self_writer::{clocking::*, config, workmodes::FChannel};
 
 //-----------------------------------------------------------------------------
 
@@ -71,4 +71,21 @@ pub type MasterCounterType =
 
 //-----------------------------------------------------------------------------
 
-pub type DatItem = (stm32_usb_self_writer::workmodes::FChannel, Option<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+pub enum FData {
+    Pressure(f64),
+    Temperature(f64),
+    Both(f64, f64),
+}
+
+impl FData {
+    pub fn as_channel(&self) -> FChannel {
+        match self {
+            FData::Pressure(_) => FChannel::Pressure,
+            FData::Temperature(_) => FChannel::Temperature,
+            FData::Both(_, _) => FChannel::Both,
+        }
+    }
+}
+
+pub type DatItem = FData;

@@ -12,8 +12,7 @@ use stm32_usb_self_writer::{
     settings,
 };
 use stm32l4xx_hal::{
-    adc,
-    flash,
+    adc, flash,
     gpio::{Analog, gpioa::PA1},
     pac,
     prelude::*,
@@ -76,9 +75,11 @@ pub fn init_settings<CRC: stm32_usb_self_writer::support::crc::ZlibCompantCrc32>
     });
 
     defmt::info!(
-        "\tSettings loaded, base period: {} ms, start delay: {} s",
+        "\tSettings loaded, base period: {} ms, start delay: {} s, ratio: {}:{}",
         write_config.base_interval_ms,
-        start_delay.to_secs()
+        start_delay.to_secs(),
+        write_config.p_write_devider,
+        write_config.t_write_devider
     );
 
     (

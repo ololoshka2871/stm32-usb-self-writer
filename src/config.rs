@@ -45,8 +45,6 @@ pub const BASE_INTERVAL_MIN_MS: u32 = 20;
 //-----------------------------------------------------------------------------
 
 pub const MINIMUM_ADAPTATION_INTERVAL: u32 = 50;
-pub const MEASURE_TIME_TO_GUARD_MULTIPLIER: f32 = 1.5;
-pub const MIN_GUARD_TIME: f64 = 100.0;
 pub const MEASURE_TIME_MAX_MS: u32 = 1000;
 pub const FREQ_MULTIPLIER: u32 = 10_000;
 /// Запас на которое время измерения меньше дедлайна, из него вычисляется цель
@@ -71,14 +69,10 @@ pub const START_BLINK_PERIOD_MS: u32 = 500;
 
 // включать счетчики за 2 периода измерения
 pub const PREHEAT_MULTIPLIER: u32 = 2;
-pub const PREHEAT_MIN_MS: u32 = 500;
+pub const PREHEAT_MIN_MS: u32 = 250;
 
 // Счетчик, отскрочки включения частотомера после включения питания
 pub const F_CH_START_COUNT: u32 = 2;
-
-// Экспериментальное значение, время с подачи питания до запуска генератора
-// Канал температуры дает 100kHz как минимум перые 100 ms, берем запас
-pub const GEN_COLD_STARTUP_TIME_MS: u32 = 200;
 
 //-----------------------------------------------------------------------------
 

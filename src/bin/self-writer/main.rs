@@ -36,7 +36,7 @@ use stm32_usb_self_writer::{
     },
     workmodes::FChannel,
 };
-    
+
 use init::*;
 
 //-----------------------------------------------------------------------------
@@ -339,7 +339,8 @@ mod app {
 
         if !high_perf_mode {
             if let Some(storage_context) = storage_context.as_mut() {
-                storage_context.set_mode(stm32_usb_self_writer::main_data_storage::StorageMode::Recorder);
+                storage_context
+                    .set_mode(stm32_usb_self_writer::main_data_storage::StorageMode::Recorder);
             }
         }
 
@@ -887,6 +888,7 @@ mod app {
 
     #[task(
         shared = [
+            &base_period,
             &rtc_sync,
             &f1_base_period_devider,
             &f2_base_period_devider,
@@ -894,10 +896,11 @@ mod app {
         ],
         local = [
             self_writer_data_tx
-        ],  
+        ],
         priority = 4
     )]
     async fn self_writer_data_catcher(ctx: self_writer_data_catcher::Context) {
+        let base_period = *ctx.shared.base_period;
         let rtc_sync = ctx.shared.rtc_sync;
         let f1_base_period_devider = *ctx.shared.f1_base_period_devider;
         let f2_base_period_devider = *ctx.shared.f2_base_period_devider;
@@ -905,43 +908,61 @@ mod app {
 
         let mut output_storage = ctx.shared.output_storage;
 
-        let mut f1_devider = f1_base_period_devider;
-        let mut f2_devider = f2_base_period_devider;
+        let mut channel_selector = FChannel::iter(f1_base_period_devider, f2_base_period_devider);
 
         loop {
-            rtc_sync.safe_wait().await;
-            f1_devider -= 1;
-            f2_devider -= 1;
+            rtc_sync.delay_sync(base_period).await;
 
-            if f1_devider == 0 {
-                f1_devider = f1_base_period_devider;
-                let f = output_storage.lock(|storage| {
-                    storage.frequencys[FChannel::Pressure as usize]
-                });
+            match channel_selector.next() {
+                Some(FChannel::Both) => {
+                    let (f1, f2) = output_storage.lock(|storage| {
+                        (
+                            storage.frequencys[FChannel::Pressure as usize],
+                            storage.frequencys[FChannel::Temperature as usize],
+                        )
+                    });
 
-                if self_writer_data_tx.try_send((FChannel::Pressure, f)).is_err() {
-                    defmt::error!("Failed to send Pressure data");
+                    if self_writer_data_tx
+                        .try_send(types::FData::Both(f1.unwrap_or(0.0), f2.unwrap_or(0.0)))
+                        .is_err()
+                    {
+                        defmt::error!("Failed to send Both data");
+                    }
                 }
-            }
+                Some(FChannel::Pressure) => {
+                    let f = output_storage
+                        .lock(|storage| storage.frequencys[FChannel::Pressure as usize]);
 
-            if f2_devider == 0 {
-                f2_devider = f2_base_period_devider;
-                let f = output_storage.lock(|storage| {
-                    storage.frequencys[FChannel::Temperature as usize]
-                });
-                if self_writer_data_tx.try_send((FChannel::Temperature, f)).is_err() {
-                    defmt::error!("Failed to send Temperature data");
+                    if self_writer_data_tx
+                        .try_send(types::FData::Pressure(f.unwrap_or(0.0)))
+                        .is_err()
+                    {
+                        defmt::error!("Failed to send Pressure data");
+                    }
                 }
+                Some(FChannel::Temperature) => {
+                    let f = output_storage
+                        .lock(|storage| storage.frequencys[FChannel::Temperature as usize]);
+                    if self_writer_data_tx
+                        .try_send(types::FData::Temperature(f.unwrap_or(0.0)))
+                        .is_err()
+                    {
+                        defmt::error!("Failed to send Temperature data");
+                    }
+                }
+                None => (),
             }
         }
     }
 
     #[task(
-        shared = [rtc, led, analog_sens, settings, &f1_base_period_devider, &f2_base_period_devider], 
-        local = [self_writer_data_rx, storage_context, crc_handler], 
+        shared = [rtc, led, analog_sens, settings, &f1_base_period_devider, &f2_base_period_devider],
+        local = [self_writer_data_rx, storage_context, crc_handler],
         priority = 1
     )]
     async fn self_writer_packer(ctx: self_writer_packer::Context) {
+        use stm32_usb_self_writer::workmodes::ChannelChecker;
+
         let mut analog_sens = ctx.shared.analog_sens;
         let mut settings = ctx.shared.settings;
         let mut rtc = ctx.shared.rtc;
@@ -958,7 +979,6 @@ mod app {
 
         let mut prevs = [0i32; 2];
         let mut current_block_packer = Option::<DataBlockPacker>::None;
-        let mut channel_iterator = FChannel::iter(f1_base_period_devider, f2_base_period_devider);
 
         let mut finalize_block = move |packer: DataBlockPacker| {
             packer.to_result_full(|data| {
@@ -967,6 +987,30 @@ mod app {
                 crc_handler.result()
             })
         };
+
+        let mut await_both = true; // первая запись в блоке длжна быть FChannel::Both
+
+        let calc_diff = |value: f64, prev: &mut i32| {
+            let f_fixed = (value * config::FREQ_MULTIPLIER as f64) as i32;
+
+            let diff = f_fixed - *prev;
+            *prev = f_fixed;
+
+            diff
+        };
+
+        fn push_val(packer: &mut DataBlockPacker, diff: i32) -> bool {
+            match packer.push_val(diff) {
+                PushResult::Success => false,
+                PushResult::Full => true,
+                PushResult::Overflow => {
+                    impls::halt_device("Self-writer block packer overflowed");
+                }
+                PushResult::Finished => {
+                    impls::halt_device("Self-writer packer entered invalid finished state");
+                }
+            }
+        }
 
         loop {
             if current_block_packer.is_none() {
@@ -978,13 +1022,10 @@ mod app {
                 let analog_values = analog_sens.lock(|sens| sens.read());
 
                 // блок с id=0 не имеет предыдущего блока, по этому 0
-                let prev_block_id = if block_id > 0 {
-                    block_id - 1
-                } else {
-                    0
-                };
+                let prev_block_id = if block_id > 0 { block_id - 1 } else { 0 };
+
                 prevs = [0i32; 2];
-                channel_iterator.reset();
+                await_both = true;
 
                 current_block_packer = Some(
                     DataBlockPacker::builder()
@@ -1003,69 +1044,69 @@ mod app {
 
             let packer = current_block_packer.as_mut().unwrap();
 
-            let (channel, value) = {
-                let await_result_channel = channel_iterator.next().unwrap();
+            let item = {
                 loop {
-                    let (channel, value) = self_writer_data_rx
+                    let item = self_writer_data_rx
                         .recv()
                         .await
                         .expect("Failed to receive data from self_writer_data_catcher task");
-                    if channel == await_result_channel {
-                        break (channel, value);
-                    } else {
-                        defmt::warn!("Received data for channel {} while waiting for {}, discarding", 
-                            channel, await_result_channel
+                    if await_both && (item.as_channel() != FChannel::Both) {
+                        defmt::warn!(
+                            "Awaiting for FChannel::Both data, but received {} data",
+                            item.as_channel()
                         );
-                    }
-                }
-            };
-
-            #[cfg(feature = "led-blink-each-block")]
-            led.lock(|led| led.set_state(config::LED_DISABLE));
-
-            let diff = if let Some(value) = value {
-                let f_fixed = (value * config::FREQ_MULTIPLIER as f64) as i32;
-                let prev = &mut prevs[channel as usize];
-
-                let diff = f_fixed - *prev;
-                *prev = f_fixed;
-                
-                diff
-            } else {
-                0
-            };
-
-            match packer.push_val(diff) {
-                PushResult::Success => {}
-                PushResult::Full => {
-                    let packer = current_block_packer.take().unwrap();
-                    let data = finalize_block(packer).unwrap_or_else(|| {
-                        impls::halt_device("Failed to finalize block");
-                    });
-                    
-                    #[cfg(feature = "led-blink-each-block")]
-                    led.lock(|led| led.set_state(config::LED_ENABLE));
-
-                    match storage_context.write_next_block(data.as_slice()) {
-                        Ok(abs_id) => {
-                            defmt::info!("Self-writer block {} stored (abs={})", block_id, abs_id);
-                        }
-                        Err(_) => {
-                            impls::halt_device("Self-writer storage write failed");
-                        }
-                    }
-                    
-                    if storage_context.used_blocks() >= storage_context.total_blocks() {
-                        impls::halt_device("Self-writer storage is full");
                     } else {
-                        block_id += 1;
+                        await_both = false;
+                        break item;
                     }
                 }
-                PushResult::Overflow => {
-                    impls::halt_device("Self-writer block packer overflowed");
+            };
+
+            let is_full = match item {
+                types::FData::Pressure(fp) => {
+                    let diff = calc_diff(fp, &mut prevs[item.as_channel() as usize]);
+                    push_val(packer, diff)
                 }
-                PushResult::Finished => {
-                    impls::halt_device("Self-writer packer entered invalid finished state");
+                types::FData::Temperature(ft) => {
+                    let diff = calc_diff(ft, &mut prevs[item.as_channel() as usize]);
+                    push_val(packer, diff)
+                }
+                types::FData::Both(fp, ft) => {
+                    let diff_p = calc_diff(fp, &mut prevs[FChannel::Pressure as usize]);
+                    if !push_val(packer, diff_p) {
+                        let diff_t = calc_diff(ft, &mut prevs[FChannel::Temperature as usize]);
+                        push_val(packer, diff_t)
+                    } else {
+                        true
+                    }
+                }
+            };
+
+            if is_full {
+                let packer = current_block_packer.take().unwrap();
+                let data = finalize_block(packer).unwrap_or_else(|| {
+                    impls::halt_device("Failed to finalize block");
+                });
+
+                #[cfg(feature = "led-blink-each-block")]
+                led.lock(|led| led.set_state(config::LED_ENABLE));
+
+                //match storage_context.write_next_block(data.as_slice()) {
+                //    Ok(abs_id) => {
+                //        defmt::info!("Self-writer block {} stored (abs={})", block_id, abs_id);
+                //    }
+                //    Err(_) => {
+                //        impls::halt_device("Self-writer storage write failed");
+                //    }
+                //}
+
+                #[cfg(feature = "led-blink-each-block")]
+                led.lock(|led| led.set_state(config::LED_DISABLE));
+
+                if storage_context.used_blocks() >= storage_context.total_blocks() {
+                    impls::halt_device("Self-writer storage is full");
+                } else {
+                    block_id += 1;
                 }
             }
         }

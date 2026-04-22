@@ -21,11 +21,6 @@ impl<M: Monotonic<Duration = config::Duration>> RtcSync<M> {
         }
     }
 
-    pub async fn safe_wait(&self) {
-        self.rtc_event.wait().await;
-        M::delay(config::Duration::from_ticks(1)).await;
-    }
-
     pub async fn delay_sync(&self, duration: M::Duration) {
         let now = M::now();
         self.rtc_event.wait().await;
@@ -60,7 +55,7 @@ impl<M: Monotonic<Duration = config::Duration>> RtcSync<M> {
 
             return if until_deadline > self.rtc_period {
                 let a = until_deadline.ticks() / self.rtc_period.ticks();
-                self.rtc_period * a as u32
+                self.rtc_period * a as u32 - zapas
             } else if until_deadline > zapas {
                 until_deadline - zapas
             } else {

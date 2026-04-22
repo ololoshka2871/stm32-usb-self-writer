@@ -33,6 +33,7 @@ impl<M: Monotonic<Duration = config::Duration>> FreqmeterStates<M> {
     );
     pub const MIN_COLD_STARTUP_TIME: M::Duration = config::Duration::millis(
         config::PREHEAT_MIN_MS
+            + config::MEASURE_TIME_MAX_MS
             + config::BASE_INTERVAL_MIN_MS
             + (1_000 / config::SYST_TIMER_HZ),
     );

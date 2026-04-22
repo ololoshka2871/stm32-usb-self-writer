@@ -204,13 +204,13 @@ macro_rules! freqmeter {
                                     prev_freq: f,
                                     deadline,
                                 };
-                                continue;
                             } else {
                                 defmt::error!(
-                                    "{}: Adaptation: freqmeter overrun 2, reset...",
+                                    "{}: Adaptation: freqmeter overrun, reset...",
                                     $channel
                                 );
                             }
+                            continue;
                         }
                         Ok(Err(_)) => {
                             defmt::panic!("{}: Capture channel closed", $channel);
@@ -359,7 +359,7 @@ macro_rules! freqmeter {
                                 continue;
                             } else {
                                 defmt::error!(
-                                    "{}: Measure: Freqmeter overrun 2, reset...",
+                                    "{}: Measure: Freqmeter overrun, reset...",
                                     $channel
                                 );
                             }
