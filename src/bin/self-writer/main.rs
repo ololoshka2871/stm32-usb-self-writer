@@ -910,6 +910,15 @@ mod app {
 
         let mut channel_selector = FChannel::iter(f1_base_period_devider, f2_base_period_devider);
 
+        rtc_sync
+            .delay_sync(config::Duration::millis(
+                config::PREHEAT_MIN_MS
+                    + config::MEASURE_TIME_MAX_MS
+                    + config::BASE_INTERVAL_MIN_MS
+                    + (1_000 / config::SYST_TIMER_HZ),
+            ))
+            .await;
+
         loop {
             rtc_sync.delay_sync(base_period).await;
 
@@ -1091,14 +1100,14 @@ mod app {
                 #[cfg(feature = "led-blink-each-block")]
                 led.lock(|led| led.set_state(config::LED_ENABLE));
 
-                //match storage_context.write_next_block(data.as_slice()) {
-                //    Ok(abs_id) => {
-                //        defmt::info!("Self-writer block {} stored (abs={})", block_id, abs_id);
-                //    }
-                //    Err(_) => {
-                //        impls::halt_device("Self-writer storage write failed");
-                //    }
-                //}
+                match storage_context.write_next_block(data.as_slice()) {
+                    Ok(abs_id) => {
+                        defmt::info!("Self-writer block {} stored (abs={})", block_id, abs_id);
+                    }
+                    Err(_) => {
+                        impls::halt_device("Self-writer storage write failed");
+                    }
+                }
 
                 #[cfg(feature = "led-blink-each-block")]
                 led.lock(|led| led.set_state(config::LED_DISABLE));
