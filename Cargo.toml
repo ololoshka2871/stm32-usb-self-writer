@@ -48,7 +48,7 @@ stm32ral = { version = "0.8", default-features = false, features = ["rtic"] }
 stm32l4xx-hal = { git = "https://github.com/stm32-rs/stm32l4xx-hal.git", rev = "e4835469a38b844865a6d5eef91542bdc6822941", features = ["rt", "unproven", "stm32-usbd"] }
 stm32-device-signature = "0.3.3"
 
-self-recorder-packet = { git = "https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git", rev = "e25058f91e", default-features = false }
+self-recorder-packet = { git = "https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git", rev = "8408b66a792611e8c96b0a5156d444ce0e6e7fb4", default-features = false }
 
 heatshrink-rust = { git = "https://github.com/ololoshka2871/heatshrink.rs.git", rev = "0af9332" }
 heatshrink-rust-macro = { git = "https://github.com/ololoshka2871/heatshrink.rs.git", rev = "0af9332" }

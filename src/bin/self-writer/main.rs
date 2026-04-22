@@ -965,19 +965,15 @@ mod app {
     }
 
     #[task(
-        shared = [rtc, led, analog_sens, settings, &f1_base_period_devider, &f2_base_period_devider],
+        shared = [rtc, led, analog_sens, settings],
         local = [self_writer_data_rx, storage_context, crc_handler],
         priority = 1
     )]
     async fn self_writer_packer(ctx: self_writer_packer::Context) {
-        use stm32_usb_self_writer::workmodes::ChannelChecker;
-
         let mut analog_sens = ctx.shared.analog_sens;
         let mut settings = ctx.shared.settings;
         let mut rtc = ctx.shared.rtc;
         let mut led = ctx.shared.led;
-        let f1_base_period_devider = *ctx.shared.f1_base_period_devider;
-        let f2_base_period_devider = *ctx.shared.f2_base_period_devider;
 
         let self_writer_data_rx = ctx.local.self_writer_data_rx;
         let storage_context = ctx.local.storage_context.as_mut().unwrap();
