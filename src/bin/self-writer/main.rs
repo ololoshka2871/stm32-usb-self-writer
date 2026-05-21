@@ -26,7 +26,7 @@ use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
     InputChannel, RtcSync,
-    clocking::rtc::RtcService,
+    clocking::{I2CRtcCtrl, rtc::RtcService},
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,
@@ -171,7 +171,7 @@ mod app {
         let (settings, flash_policy, base_period, start_delay, write_config) =
             init_settings(flash, unsafe { crc.make_handler() }, high_perf_mode);
 
-        let rtc = init_rtc_service(
+        let mut rtc = init_rtc_service(
             base_period,
             dp.RTC,
             &mut dp.EXTI,
@@ -309,23 +309,43 @@ mod app {
         };
 
         {
-            let rtc_i2c = stm32l4xx_hal::i2c::I2c::i2c3(
-                dp.I2C3,
-                (
-                    gpioc.pc0.into_alternate_open_drain(
-                        &mut gpioc.moder,
-                        &mut gpioc.otyper,
-                        &mut gpioc.afrl,
-                    ),
-                    gpioc.pc1.into_alternate_open_drain(
-                        &mut gpioc.moder,
-                        &mut gpioc.otyper,
-                        &mut gpioc.afrl,
-                    ),
-                ),
-                stm32l4xx_hal::i2c::Config::new(100_u32.kHz(), clocks),
-                &mut rcc.apb1r1,
+            let mut sda = gpioc.pc0.into_alternate_open_drain(
+                &mut gpioc.moder,
+                &mut gpioc.otyper,
+                &mut gpioc.afrl,
             );
+            sda.internal_pull_up(&mut gpioc.pupdr, true);
+
+            let mut scl = gpioc.pc1.into_alternate_open_drain(
+                &mut gpioc.moder,
+                &mut gpioc.otyper,
+                &mut gpioc.afrl,
+            );
+            scl.internal_pull_up(&mut gpioc.pupdr, true);
+
+            let rtc_i2c: stm32l4xx_hal::i2c::I2c<stm32l4xx_hal::pac::I2C3, (_, _)> =
+                stm32l4xx_hal::i2c::I2c::i2c3(
+                    dp.I2C3,
+                    (sda, scl),
+                    stm32l4xx_hal::i2c::Config::new(100_u32.kHz(), clocks),
+                    &mut rcc.apb1r1,
+                );
+
+            match crate::init::try_init_external_rtc(rtc_i2c) {
+                Ok(mut ext_rtc) => {
+                    let rtc_time = ext_rtc.current_time().unwrap();
+                    defmt::info!("\tExternal RTC detected: {} [{}]", &ext_rtc, rtc_time);
+
+                    rtc.set_time(rtc_time);
+                    defmt::warn!("\tInternal RTC time set to match external RTC");
+                }
+                Err(rtc_i2c) => {
+                    defmt::info!("\tNo external RTC detected");
+                    let (_, (sda, scl)) = rtc_i2c.free();
+                    let _ = sda.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                    let _ = scl.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                }
+            }
         }
 
         let storage_meta = storage_context.meta_handle();

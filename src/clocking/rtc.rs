@@ -7,55 +7,11 @@ use stm32l4xx_hal::{
     rtc::{Event, Rtc, RtcClockSource, RtcConfig, RtcWakeupClockSource},
 };
 
+use super::CurrentTime;
+
 const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
 const LSE_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
 const LSI_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct CurrentTime {
-    pub year: u32,
-    pub month: u32,
-    pub day_of_month: u32,
-    pub day_of_week: u32,
-    pub hours: u32,
-    pub minutes: u32,
-    pub seconds: u32,
-    pub milliseconds: u32,
-}
-
-impl defmt::Format for CurrentTime {
-    fn format(&self, fmt: defmt::Formatter) {
-        defmt::write!(
-            fmt,
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
-            self.year,
-            self.month,
-            self.day_of_month,
-            self.hours,
-            self.minutes,
-            self.seconds,
-            self.milliseconds
-        );
-    }
-}
-
-impl Into<u64> for CurrentTime {
-    fn into(self) -> u64 {
-        let year = self.year as u64;
-        let month = self.month as u64;
-        let day = self.day_of_month as u64;
-        let hours = self.hours as u64;
-        let minutes = self.minutes as u64;
-        let seconds = self.seconds as u64;
-        let milliseconds = self.milliseconds as u64;
-
-        // Simple conversion to milliseconds since a fixed point in time (e.g., 1970-01-01)
-        (((year * 12 + month) * 31 + day) * 24 + hours) * 60 * 60 * 1000
-            + minutes * 60 * 1000
-            + seconds * 1000
-            + milliseconds
-    }
-}
 
 pub struct RtcService {
     rtc: Rtc,
@@ -137,6 +93,25 @@ impl RtcService {
             seconds: time.seconds,
             milliseconds: time.micros / 1_000,
         }
+    }
+
+    pub fn set_time(&mut self, time: CurrentTime) {
+        use stm32l4xx_hal::datetime::{Day, DateInMonth, Month, Year, Hour, Minute, Second, Time};
+        self.rtc.set_date_time(
+            Date::new(
+                Day(time.day_of_week),
+                DateInMonth(time.day_of_month),
+                Month(time.month),
+                Year(time.year),
+            ),
+            Time::new(
+                Hour::hours(time.hours),
+                Minute::minutes(time.minutes),
+                Second::secs(time.seconds),
+                Micros::micros(time.milliseconds * 1_000),
+                false,
+            ),
+        );
     }
 
     pub fn handle_alarm_interrupt(&mut self) -> bool {

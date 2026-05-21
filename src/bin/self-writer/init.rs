@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+
 use qspi_stm32lx3::{
     qspi::{ClkPin, IO0Pin, IO1Pin, IO2Pin, IO3Pin, IntoVirtualClk, NCSPin, SharedQUADSPI},
     qspi_shared_channel::QspiSharedChannel,
@@ -14,12 +15,12 @@ use stm32_usb_self_writer::{
 use stm32l4xx_hal::{
     adc, flash,
     gpio::{Analog, gpioa::PA1},
-    pac,
-    prelude::*,
-    pwr,
+    pac, pwr,
     rcc::{self, Clocks},
     time::Hertz,
 };
+
+use embedded_hal::blocking::i2c;
 
 use usb_device::bus::UsbBusAllocator;
 use usbd_serial::CdcAcmClass;
@@ -347,4 +348,12 @@ where
             defmt::panic!("No QSPI flash detected on any bank!");
         }
     }
+}
+
+pub fn try_init_external_rtc<I2C: i2c::Write + i2c::Read + i2c::WriteRead + 'static>(
+    i2c: I2C,
+) -> Result<stm32_usb_self_writer::clocking::ext_rtc::ExtRtcType<I2C>, I2C> {
+    let rtc = stm32_usb_self_writer::clocking::ext_rtc::try_detect_i2c_rtc(i2c)?;
+
+    Ok(rtc)
 }
