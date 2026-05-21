@@ -141,7 +141,7 @@ pub fn init_master_timer(
 ) -> types::MasterCounter {
     let mut master_timer = types::MasterCounter::new(stm32l4xx_hal::timer::Timer::tim6(
         tim6,
-        1.hz(),
+        Hertz::Hz(1),
         clocks,
         apb1r1,
     ));
@@ -239,7 +239,7 @@ where
     IO3_2: IO3Pin<QUADSPI> + 'static,
 {
     flash_reset_pin.set_low().ok();
-    cortex_m::asm::delay(clocks.sysclk().0 / 100); // ~10ms delay
+    cortex_m::asm::delay(clocks.sysclk().to_Hz() / 100); // ~10ms delay
     flash_reset_pin.set_high().ok();
 
     let shared_qspi: &'static SharedQUADSPI =

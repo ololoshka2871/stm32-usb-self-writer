@@ -15,7 +15,7 @@ use self_recorder_packet::{DataBlockPacker, PushResult};
 
 use stm32l4xx_hal::{
     dma::dma1,
-    gpio::{Output, PD10, PD13, PushPull, Alternate, PA5, PA8},
+    gpio::{Alternate, Output, PA5, PA8, PD10, PD13, PushPull},
     pac::{TIM1, TIM2},
     prelude::*,
 };
@@ -107,7 +107,7 @@ mod app {
         master_timer: types::MasterCounter,
         f1_power_pin: PD10<Output<PushPull>>,
         f2_power_pin: PD13<Output<PushPull>>,
-        
+
         f1_capture_buffer: &'static mut types::MasterCounterType,
         f1_capture_tx: Sender<'static, Capture, 1>,
         f1_capture_rx: Receiver<'static, Capture, 1>,
@@ -160,7 +160,7 @@ mod app {
         defmt::info!("\tHeap");
 
         // Initialize the systick interrupt & obtain the token to prove that we did
-        Mono::start(ctx.core.SYST, clocks.hclk().0);
+        Mono::start(ctx.core.SYST, clocks.hclk().to_Hz());
         defmt::info!("\tSysTick");
 
         let crc = {
@@ -307,6 +307,26 @@ mod app {
                 &clocks,
             )
         };
+
+        {
+            let rtc_i2c = stm32l4xx_hal::i2c::I2c::i2c3(
+                dp.I2C3,
+                (
+                    gpioc.pc0.into_alternate_open_drain(
+                        &mut gpioc.moder,
+                        &mut gpioc.otyper,
+                        &mut gpioc.afrl,
+                    ),
+                    gpioc.pc1.into_alternate_open_drain(
+                        &mut gpioc.moder,
+                        &mut gpioc.otyper,
+                        &mut gpioc.afrl,
+                    ),
+                ),
+                stm32l4xx_hal::i2c::Config::new(100_u32.kHz(), clocks),
+                &mut rcc.apb1r1,
+            );
+        }
 
         let storage_meta = storage_context.meta_handle();
         let storage_meta_usb = storage_meta;

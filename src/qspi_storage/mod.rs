@@ -334,7 +334,7 @@ pub fn probe(
 ) -> Result<Identification, QspiError> {
     let config = qspi_stm32lx3::QspiConfig::default()
         /* failsafe config */
-        .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
+        .clock_prescaler(sys_clk.to_MHz() as u8)
         .clock_mode(qspi_stm32lx3::qspi::ClockMode::Mode3);
 
     qspi.apply_config(config);

@@ -1,5 +1,5 @@
 use stm32l4xx_hal::{
-    datetime::{Date, Time, U32Ext},
+    datetime::{Date, Hour, Micros, Minute, Second, Time, U32Ext},
     hal::timer::CountDown,
     pac::{self},
     pwr,
@@ -92,7 +92,13 @@ impl RtcService {
         if rtc.read_backup_register(0) != Some(RTC_INIT_MARKER) {
             rtc.set_date_time(
                 Date::new(4.day(), 1.date(), 1.month(), 2026.year()),
-                Time::new(0.hours(), 0.minutes(), 0.seconds(), 0.micros(), false),
+                Time::new(
+                    Hour::hours(0),
+                    Minute::minutes(0),
+                    Second::secs(0),
+                    Micros::micros(0),
+                    false,
+                ),
             );
             rtc.write_backup_register(0, RTC_INIT_MARKER);
         }
@@ -186,5 +192,3 @@ fn select_rtc_clock_source() -> RtcClockSource {
 
     RtcClockSource::LSI
 }
-
-

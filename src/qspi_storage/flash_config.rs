@@ -2,7 +2,7 @@ use qspi_stm32lx3::{
     QspiConfig,
     qspi::{AddressSize, QspiError},
 };
-use stm32l4xx_hal::time::Hertz;
+use stm32l4xx_hal::{time::Hertz};
 
 use super::qspi_driver::FlashDriver;
 
@@ -58,7 +58,7 @@ impl FlashConfig {
         let mut cfg = QspiConfig::default()
             .clock_prescaler(core::cmp::max(
                 1,
-                (qspi_base_clock_speed.0 / self.qspi_max_freq.0) as u8,
+                (qspi_base_clock_speed.to_Hz() / self.qspi_max_freq.to_Hz()) as u8,
             ))
             .clock_mode(qspi_stm32lx3::qspi::ClockMode::Mode3)
             .flash_size({
@@ -70,7 +70,7 @@ impl FlashConfig {
             })
             .address_size(self.address_size)
             .chip_select_high_time(
-                core::cmp::min((qspi_base_clock_speed.0 / 10_000_000) as u8, 8), // max 8
+                core::cmp::min((qspi_base_clock_speed.to_MHz() / 10) as u8, 8), // max 8
             )
             .qpi_mode(true);
 
@@ -125,7 +125,7 @@ pub static FLASH_CONFIGS: [FlashConfig; 1] = [
         address_size: AddressSize::Addr24Bit,
 
         qspi_flash_size_code: 26,
-        qspi_max_freq: Hertz(20_000_000),
+        qspi_max_freq: Hertz::MHz(20),
         flash_prepare_qspi: Some(MT25QU01GBBB8E12::flash_prepare_qspi),
         special_qspi_config: None,
         flash_finalise_config: Some(MT25QU01GBBB8E12::flash_finalise_config),

@@ -95,7 +95,7 @@ impl<M: Monotonic<Duration = config::Duration, Instant = config::Instant> + 'sta
     ) -> Result<Arc<RefCell<Box<dyn FlashDriver>>>, QspiError> {
         let config = QspiConfig::default()
             /* failsafe config */
-            .clock_prescaler((sys_clk.0 / 1_000_000) as u8)
+            .clock_prescaler(sys_clk.to_MHz() as u8)
             .clock_mode(qspi::ClockMode::Mode3);
 
         qspi.apply_config(config);

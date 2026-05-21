@@ -54,23 +54,23 @@ impl<
 {
     fn core_frequency() -> Hertz {
         let f = XTAL_FREQ * PLL::M / (PLL::PD * PLL::AD);
-        Hertz(f)
+        Hertz::Hz(f)
     }
 
     fn apb1_frequency() -> Hertz {
-        Hertz(Self::core_frequency().0 / APB1_DEVIDER)
+        Hertz::Hz(Self::core_frequency().to_Hz() / APB1_DEVIDER)
     }
 
     fn apb2_frequency() -> Hertz {
-        Hertz(Self::core_frequency().0 / APB2_DEVIDER)
+        Hertz::Hz(Self::core_frequency().to_Hz() / APB2_DEVIDER)
     }
 
     // stm32_cube: if APB devider > 1, timers freq APB*2
     fn master_counter_frequency() -> Hertz {
         if APB1_DEVIDER > 1 {
-            Hertz(Self::core_frequency().0 / APB1_DEVIDER * 2)
+            Hertz::Hz(Self::core_frequency().to_Hz() / APB1_DEVIDER * 2)
         } else {
-            Hertz(Self::core_frequency().0 / APB1_DEVIDER)
+            Hertz::Hz(Self::core_frequency().to_Hz() / APB1_DEVIDER)
         }
     }
 
@@ -80,9 +80,9 @@ impl<
 
     fn xtal2master_freq_multiplier() -> f64 {
         if APB1_DEVIDER > 1 {
-            Self::core_frequency().0 as f64 / APB1_DEVIDER as f64 * 2.0
+            Self::core_frequency().to_Hz() as f64 / APB1_DEVIDER as f64 * 2.0
         } else {
-            Self::core_frequency().0 as f64
+            Self::core_frequency().to_Hz() as f64
         }
     }
 
@@ -126,7 +126,7 @@ impl<
             let mut cfgr = cfgr
                 .hsi48(false)
                 .hse(
-                    Hertz(XTAL_FREQ), // onboard crystall
+                    Hertz::Hz(XTAL_FREQ), // onboard crystall
                     stm32l4xx_hal::rcc::CrystalBypass::Disable,
                     stm32l4xx_hal::rcc::ClockSecuritySystem::Enable,
                 )

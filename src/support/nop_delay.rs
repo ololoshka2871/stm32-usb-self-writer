@@ -6,12 +6,12 @@ pub struct NOPDelay {
 
 impl embedded_hal::blocking::delay::DelayUs<u32> for NOPDelay {
     fn delay_us(&mut self, us: u32) {
-        cortex_m::asm::delay(self.sys_clk.0 / 1_000_000 * us);
+        cortex_m::asm::delay(self.sys_clk.to_MHz() * us);
     }
 }
 
 impl embedded_hal::blocking::delay::DelayMs<u8> for NOPDelay {
     fn delay_ms(&mut self, ms: u8) {
-        cortex_m::asm::delay(self.sys_clk.0 / 1_000 * (ms as u32));
+        cortex_m::asm::delay(self.sys_clk.to_kHz() * (ms as u32));
     }
 }

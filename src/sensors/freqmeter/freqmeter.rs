@@ -8,7 +8,7 @@ pub fn calc_result(start: Capture, capture: Capture, f_ref: Hertz) -> Result<(f3
         Err(())
     } else {
         let result = capture.wrapping_sub(start);
-        let f = (capture.target as f32 * f_ref.0 as f32) / (result as f32);
+        let f = (capture.target as f32 * f_ref.to_Hz() as f32) / (result as f32);
         Ok((f, result))
     }
 }
