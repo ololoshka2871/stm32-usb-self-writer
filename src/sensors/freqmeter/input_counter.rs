@@ -1,5 +1,5 @@
 use stm32l4xx_hal::{
-    gpio::{Alternate, PushPull, PA0, PA1, PA8, PA9},
+    gpio::{Alternate, PushPull, PA0, PA1, PA5, PA8, PA9, PB3},
     pac::{RCC, TIM1, TIM2},
 };
 
@@ -24,16 +24,17 @@ impl From<u8> for ExtInputType {
 }
 
 pub trait TimerInpitCounterExt<PIN, const IN_TYPE: u8>: Sized {
-    fn into_input_counter(self, _pin: PIN) -> InputCounter<Self, IN_TYPE> {
-        InputCounter { tim: self }
+    fn into_input_counter(self, _pin: PIN) -> InputCounter<Self, PIN, IN_TYPE> {
+        InputCounter { tim: self, _pin }
     }
 }
 
-pub struct InputCounter<TIM, const IN_TYPE: u8> {
+pub struct InputCounter<TIM, PIN, const IN_TYPE: u8> {
     tim: TIM,
+    _pin: PIN,
 }
 
-impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> InputCounter<TIM, IN_TYPE> {
+impl<TIM: TimerInputConfig + TimerControl, PIN, const IN_TYPE: u8> InputCounter<TIM, PIN, IN_TYPE> {
     pub fn configure(&mut self) {
         let ext_in_type = IN_TYPE.into();
 
@@ -73,20 +74,20 @@ macro_rules! impl_input_counters {
                 fn into_input_counter(
                     self,
                     _pin: $PIN,
-                ) -> InputCounter<Self, $EXT_IN_TYPE> {
-                    InputCounter::<Self, $EXT_IN_TYPE>::new(self)
+                ) -> InputCounter<Self, $PIN, $EXT_IN_TYPE> {
+                    InputCounter::<Self, $PIN, $EXT_IN_TYPE>::new(self, _pin)
                 }
             }
 
-            impl InputCounter<$TIM, $EXT_IN_TYPE> {
-                pub fn new(tim: $TIM) -> Self {
+            impl InputCounter<$TIM, $PIN, $EXT_IN_TYPE> {
+                pub fn new(tim: $TIM, _pin: $PIN) -> Self {
                     let rcc = unsafe { &*RCC::ptr() };
 
                     rcc.$apbenr.modify(|_, w| w.$timXen().set_bit());
                     rcc.$apbrstr.modify(|_, w| w.$timXrst().set_bit());
                     rcc.$apbrstr.modify(|_, w| w.$timXrst().clear_bit());
 
-                    let mut t = Self { tim };
+                    let mut t = Self { tim, _pin };
                     t.configure();
                     t
                 }
@@ -100,5 +101,7 @@ impl_input_counters!(
     TIM1: (PA9<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim1en, tim1rst, apb2enr, apb2rstr),
 
     TIM2: (PA0<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
+    TIM2: (PA5<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
     TIM2: (PA1<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
+    TIM2: (PB3<Alternate<PushPull, 1>>, { ExtInputType::TI2FP2 as u8 }, tim2en, tim2rst, apb1enr1, apb1rstr1),
 );

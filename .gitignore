@@ -26,3 +26,5 @@ __pycache__/
 # pdf
 *.pdf
 !maket.pdf
+!STM32L433xx-short.pdf
+!ARV v2.pdf

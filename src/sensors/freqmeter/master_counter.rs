@@ -34,9 +34,9 @@ macro_rules! master_timer {
                     Self(extender as *mut _)
                 }
 
-                pub fn make_capturer<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8>(
-                    &self, input_counter: InputCounter<TIM, IN_TYPE>
-                ) -> Capturer<TIM, IN_TYPE> {
+                pub fn make_capturer<TIM: TimerInputConfig + TimerControl, PIN, const IN_TYPE: u8>(
+                    &self, input_counter: InputCounter<TIM, PIN, IN_TYPE>
+                ) -> Capturer<TIM, PIN, IN_TYPE> {
                     let tgt = unsafe { $ral_steal_tgt };
                     Capturer::new(input_counter, &tgt.CNT as *const _ as u32, self.0 as *const _)
                 }

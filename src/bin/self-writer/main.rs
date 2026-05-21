@@ -15,7 +15,7 @@ use self_recorder_packet::{DataBlockPacker, PushResult};
 
 use stm32l4xx_hal::{
     dma::dma1,
-    gpio::{Output, PD10, PD13, PushPull},
+    gpio::{Output, PD10, PD13, PushPull, Alternate, PA5, PA8},
     pac::{TIM1, TIM2},
     prelude::*,
 };
@@ -75,11 +75,11 @@ mod app {
 
         master_counter_freq: stm32l4xx_hal::time::Hertz,
 
-        transfer_fin1: dma1::C6,
-        f1_capturer: Capturer<TIM1, { ExtInputType::TI1FP1 as u8 }>,
+        transfer_fin1: dma1::C2,
+        f1_capturer: Capturer<TIM2, PA5<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }>,
 
-        transfer_fin2: dma1::C2,
-        f2_capturer: Capturer<TIM2, { ExtInputType::TI1FP1 as u8 }>,
+        transfer_fin2: dma1::C6,
+        f2_capturer: Capturer<TIM1, PA8<Alternate<PushPull, 1>>, { ExtInputType::TI1FP1 as u8 }>,
 
         settings: settings::SettingsManagerType,
         flash_policy: settings::FlasRWPolcy<settings::AppSettings, STM32L4Crc32Handler>,
@@ -105,9 +105,9 @@ mod app {
         storage_erase: stm32_usb_self_writer::main_data_storage::StorageEraseHandle,
 
         master_timer: types::MasterCounter,
-        f1_power_pin: PD13<Output<PushPull>>,
-        f2_power_pin: PD10<Output<PushPull>>,
-
+        f1_power_pin: PD10<Output<PushPull>>,
+        f2_power_pin: PD13<Output<PushPull>>,
+        
         f1_capture_buffer: &'static mut types::MasterCounterType,
         f1_capture_tx: Sender<'static, Capture, 1>,
         f1_capture_rx: Receiver<'static, Capture, 1>,
@@ -189,7 +189,7 @@ mod app {
         #[allow(dead_code, unused_mut)]
         let mut gpiod = dp.GPIOD.split(&mut rcc.ahb2);
         #[allow(dead_code, unused_mut)]
-        let mut gpioe = dp.GPIOE.split(&mut rcc.ahb2);
+        let mut _gpioe = dp.GPIOE.split(&mut rcc.ahb2);
 
         let analog_sens = init_analog_sensors(
             &clocks,
@@ -206,6 +206,28 @@ mod app {
 
         let (transfer_fin1, f1_capturer, f1_capture_buffer, (f1_capture_tx, f1_capture_rx)) = stm32_usb_self_writer::build_freqmeter_dma!(
             input_timer = dp
+                .TIM2
+                .into_input_counter(gpioa.pa5.into_alternate_push_pull(
+                    &mut gpioa.moder,
+                    &mut gpioa.otyper,
+                    &mut gpioa.afrl
+                )),
+            dma_channel = dma1.2, // DMA1 Channel 2[CxS=4] is connected to TIM2_UP
+            master_timer = master_timer,
+            master_type = types::MasterCounterType,
+            dp = dp,
+            stop_reg = apb1fzr1,
+            stop_bit = dbg_tim2_stop
+        );
+        let f1_power_pin = gpiod.pd10.into_push_pull_output_in_state(
+            &mut gpiod.moder,
+            &mut gpiod.otyper,
+            config::GENERATOR_DISABLE_LVL,
+        );
+        defmt::info!("\tFreqmeter 1");
+
+        let (transfer_fin2, f2_capturer, f2_capture_buffer, (f2_capture_tx, f2_capture_rx)) = stm32_usb_self_writer::build_freqmeter_dma!(
+            input_timer = dp
                 .TIM1
                 .into_input_counter(gpioa.pa8.into_alternate_push_pull(
                     &mut gpioa.moder,
@@ -219,29 +241,7 @@ mod app {
             stop_reg = apb2fzr,
             stop_bit = dbg_tim1_stop
         );
-        let f1_power_pin = gpiod.pd13.into_push_pull_output_in_state(
-            &mut gpiod.moder,
-            &mut gpiod.otyper,
-            config::GENERATOR_DISABLE_LVL,
-        );
-        defmt::info!("\tFreqmeter 1");
-
-        let (transfer_fin2, f2_capturer, f2_capture_buffer, (f2_capture_tx, f2_capture_rx)) = stm32_usb_self_writer::build_freqmeter_dma!(
-            input_timer = dp
-                .TIM2
-                .into_input_counter(gpioa.pa0.into_alternate_push_pull(
-                    &mut gpioa.moder,
-                    &mut gpioa.otyper,
-                    &mut gpioa.afrl
-                )),
-            dma_channel = dma1.2, // DMA1 Channel 2[CxS=4] is connected to TIM2_UP
-            master_timer = master_timer,
-            master_type = types::MasterCounterType,
-            dp = dp,
-            stop_reg = apb1fzr1,
-            stop_bit = dbg_tim2_stop
-        );
-        let f2_power_pin = gpiod.pd10.into_push_pull_output_in_state(
+        let f2_power_pin = gpiod.pd13.into_push_pull_output_in_state(
             &mut gpiod.moder,
             &mut gpiod.otyper,
             config::GENERATOR_DISABLE_LVL,
@@ -266,9 +266,9 @@ mod app {
                     .pb1
                     .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
                 #[cfg(feature = "maket")]
-                gpioe
+                _gpioe
                     .pe12
-                    .into_alternate(&mut gpioe.moder, &mut gpioe.otyper, &mut gpioe.afrh),
+                    .into_alternate(&mut _gpioe.moder, &mut _gpioe.otyper, &mut _gpioe.afrh),
                 gpiob
                     .pb0
                     .into_alternate(&mut gpiob.moder, &mut gpiob.otyper, &mut gpiob.afrl),
@@ -484,7 +484,7 @@ mod app {
     }
 
     #[task(
-        binds=DMA1_CH6,
+        binds=DMA1_CH2,
         shared = [transfer_fin1, f1_capturer],
         local = [f1_capture_buffer, f1_capture_tx],
         priority = 5)
@@ -500,7 +500,7 @@ mod app {
     }
 
     #[task(
-        binds=DMA1_CH2,
+        binds=DMA1_CH6,
         shared = [transfer_fin2, f2_capturer],
         local = [f2_capture_buffer, f2_capture_tx],
         priority = 5)

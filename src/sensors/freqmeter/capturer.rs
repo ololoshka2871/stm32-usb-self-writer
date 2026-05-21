@@ -5,16 +5,16 @@ use super::{
     tim_input_config_helper::{TimerControl, TimerInputConfig},
 };
 
-pub struct Capturer<TIM, const IN_TYPE: u8> {
-    input: InputCounter<TIM, IN_TYPE>,
+pub struct Capturer<TIM, PIN, const IN_TYPE: u8> {
+    input: InputCounter<TIM, PIN, IN_TYPE>,
     master_cnt_reg_addr: u32,
     current_target: u16,
     master_extender: *const u16,
 }
 
-impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> Capturer<TIM, IN_TYPE> {
+impl<TIM: TimerInputConfig + TimerControl, PIN, const IN_TYPE: u8> Capturer<TIM, PIN, IN_TYPE> {
     pub fn new(
-        input: InputCounter<TIM, IN_TYPE>,
+        input: InputCounter<TIM, PIN, IN_TYPE>,
         master_cnt_reg_addr: u32,
         master_extender: *const u16,
     ) -> Self {
@@ -68,13 +68,13 @@ impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> Capturer<TIM, IN_T
     }
 }
 
-unsafe impl<TIM: TimerInputConfig + TimerControl, const IN_TYPE: u8> Send
-    for Capturer<TIM, IN_TYPE>
+unsafe impl<TIM: TimerInputConfig + TimerControl, PIN, const IN_TYPE: u8> Send
+    for Capturer<TIM, PIN, IN_TYPE>
 {
 }
 
 // через этот трейт DMA будет знать адрес откуда копировать данные
-unsafe impl<TIM: TimerInputConfig, const IN_TYPE: u8> PeriAddress for Capturer<TIM, IN_TYPE> {
+unsafe impl<TIM: TimerInputConfig, PIN, const IN_TYPE: u8> PeriAddress for Capturer<TIM, PIN, IN_TYPE> {
     type MemSize = u32;
 
     #[inline(always)]
@@ -84,4 +84,4 @@ unsafe impl<TIM: TimerInputConfig, const IN_TYPE: u8> PeriAddress for Capturer<T
 }
 
 // это маркер того что безопасно читать данные из этого периферийного устройства в любом контексте
-impl<TIM: TimerInputConfig, const IN_TYPE: u8> SafePeripheralRead for Capturer<TIM, IN_TYPE> {}
+impl<TIM: TimerInputConfig, PIN, const IN_TYPE: u8> SafePeripheralRead for Capturer<TIM, PIN, IN_TYPE> {}
