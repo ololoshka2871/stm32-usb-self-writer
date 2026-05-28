@@ -65,7 +65,7 @@ impl<I2C: Write + Read + WriteRead + 'static> I2CRtcCtrl for Rv3028v7<I2C> {
     }
 
     fn set_tick_period(&mut self, period: Hertz) -> Result<(), I2CRtcError> {
-        const EEPROM_CLKOUT_REG: u8 = 0x1C;
+        const EEPROM_CLKOUT_REG: u8 = 0x35;
 
         #[derive(Clone, Copy)]
         enum TickRate {
@@ -99,14 +99,10 @@ impl<I2C: Write + Read + WriteRead + 'static> I2CRtcCtrl for Rv3028v7<I2C> {
             _ => return Err(I2CRtcError::UnsupportedSetting),
         };
 
-        self.i2c
-            .write(RV3028V7_I2C_ADDR, &[EEPROM_CLKOUT_REG])
-            .map_err(|_| I2CRtcError::I2cWriteError)?;
-
         let mut current = [0_u8; 1];
         self.i2c
-            .read(RV3028V7_I2C_ADDR, &mut current)
-            .map_err(|_| I2CRtcError::I2cReadError)?;
+            .write_read(RV3028V7_I2C_ADDR, &[EEPROM_CLKOUT_REG], &mut current)
+            .map_err(|_| I2CRtcError::I2cWriteError)?;
 
         let new_value = (current[0] & !TickRate::mask()) | data.to_bits() | (1 << 7); // Enable CLKOUT output
         self.i2c

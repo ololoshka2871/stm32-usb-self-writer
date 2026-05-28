@@ -15,9 +15,13 @@ use self_recorder_packet::{DataBlockPacker, PushResult};
 
 use stm32l4xx_hal::{
     dma::dma1,
-    gpio::{Alternate, Output, PA5, PA8, PD10, PD13, PushPull},
-    pac::{TIM1, TIM2},
+    gpio::{
+        Alternate, Floating, Input, OpenDrain, Output, PA5, PA8, PC0, PC1, PC2, PD10, PD13,
+        PushPull,
+    },
+    pac::{I2C3, TIM1, TIM2},
     prelude::*,
+    rcc::Enable,
 };
 
 use rtic::app;
@@ -26,7 +30,7 @@ use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
     InputChannel, RtcSync,
-    clocking::{I2CRtcCtrl, rtc::RtcService},
+    clocking::{I2CRtcCtrl, ext_rtc::ExtRtcType, rtc::RtcService},
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,
@@ -60,9 +64,7 @@ const RES_QUEUE_SIZE: usize = 192;
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP, SWPMI1])]
 mod app {
-    use stm32l4xx_hal::rcc::Enable;
-
-use super::*;
+    use super::*;
 
     #[shared]
     struct Shared {
@@ -129,6 +131,16 @@ use super::*;
         prepare_delay: config::Duration,
 
         storage_context: Option<stm32_usb_self_writer::main_data_storage::StorageContext>,
+
+        ext_rtc: Option<
+            ExtRtcType<
+                stm32l4xx_hal::i2c::I2c<
+                    I2C3,
+                    (PC0<Alternate<OpenDrain, 4>>, PC1<Alternate<OpenDrain, 4>>),
+                >,
+            >,
+        >,
+        rtc_tick_pin: Option<PC2<Input<Floating>>>,
     }
 
     #[init]
@@ -310,7 +322,7 @@ use super::*;
             )
         };
 
-        {
+        let (ext_rtc, rtc_tick_pin) = {
             let mut sda = gpioc.pc0.into_alternate_open_drain(
                 &mut gpioc.moder,
                 &mut gpioc.otyper,
@@ -346,27 +358,29 @@ use super::*;
                         .into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
                     rtc_tick_pin.make_interrupt_source(&mut dp.SYSCFG, &mut rcc.apb2);
                     rtc_tick_pin.enable_interrupt(&mut dp.EXTI);
-                    rtc_tick_pin.trigger_on_edge(&mut dp.EXTI, stm32l4xx_hal::gpio::Edge::Rising);
-                    
+                    rtc_tick_pin.trigger_on_edge(&mut dp.EXTI, stm32l4xx_hal::gpio::Edge::Falling);
+
                     defmt::warn!(
                         "\tWaiting for external RTC to tick to synchronize internal RTC with it..."
                     );
                     while ext_rtc_time.seconds == 59 {
                         ext_rtc_time = ext_rtc.current_time().unwrap();
                     }
-                    
+
                     rtc_tick_pin.clear_interrupt_pending_bit();
                     while !rtc_tick_pin.check_interrupt() {
                         cortex_m::asm::delay(1_000);
                     }
                     rtc_tick_pin.clear_interrupt_pending_bit();
-                    
+
                     ext_rtc_time.seconds += 1;
                     rtc.set_time(ext_rtc_time);
                     defmt::warn!(
                         "\tInternal RTC time set to match external RTC: [{}]",
                         ext_rtc_time
                     );
+
+                    (Some(ext_rtc), Some(rtc_tick_pin))
                 }
                 Err(rtc_i2c) => {
                     defmt::info!("\tNo external RTC detected");
@@ -375,9 +389,11 @@ use super::*;
                     i2c.cr1.modify(|_, w| w.pe().clear_bit());
                     let _ = sda.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
                     let _ = scl.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
+
+                    (None, None)
                 }
             }
-        }
+        };
 
         let storage_meta = storage_context.meta_handle();
         let storage_meta_usb = storage_meta;
@@ -543,6 +559,9 @@ use super::*;
                 prepare_delay,
 
                 storage_context,
+
+                ext_rtc,
+                rtc_tick_pin,
             },
         )
     }
@@ -603,6 +622,36 @@ use super::*;
         // Если поток, ожидающий rtc_event не сделает любой .await до следующего
         // rtc_event.wait().await, то он сожрет все нотификации в 1 лицо
         rtc_sync.notify_all();
+    }
+
+    #[task(binds = EXTI2, local = [rtc_tick_pin, counter: u32 = 0], priority = 2)]
+    fn rtc_tick(ctx: rtc_tick::Context) {
+        let rtc_tick_pin = ctx.local.rtc_tick_pin;
+        let counter = ctx.local.counter;
+
+        if let Some(rtc_tick_pin) = rtc_tick_pin {
+            if rtc_tick_pin.check_interrupt() {
+                rtc_tick_pin.clear_interrupt_pending_bit();
+
+                *counter += 1;
+
+                if *counter == config::EXT_RTC_SYNC_PERIOD_S {
+                    *counter = 0;
+
+                    sync_to_ext_rtc::spawn().ok();
+                }
+            }
+            return;
+        }
+        /*
+        if let Some(p) = pin {
+            // другие прерывания по пинам EXTI2
+        }
+        */
+
+        // Ложное срабатывание прерывания от EXTI2, который может быть вызван чем угодно,
+        // и в этом случае нужно навсегда отключить его обработку, чтобы не мешало
+        cortex_m::peripheral::NVIC::mask(stm32l4xx_hal::pac::Interrupt::EXTI2);
     }
 
     //-------------------------------------------------------------------------
@@ -1227,6 +1276,21 @@ use super::*;
             Ok(true) => defmt::info!("Storage erase completed"),
             Ok(false) => (),
             Err(e) => defmt::error!("Storage erase failed: {}", defmt::Debug2Format(&e)),
+        }
+    }
+
+    #[task(local = [ext_rtc], priority = 2)]
+    async fn sync_to_ext_rtc(ctx: sync_to_ext_rtc::Context) {
+        let ext_rtc = ctx.local.ext_rtc;
+
+        if let Some(ext_rtc) = ext_rtc {
+            if let Ok(rtc_time) = ext_rtc.current_time() {
+                defmt::info!("Sync to external clocks: {}", rtc_time);
+            } else {
+                defmt::warn!("Failed to get time from external RTC");
+            }
+        } else {
+            defmt::error!("No external RTC to sync with");
         }
     }
 }
