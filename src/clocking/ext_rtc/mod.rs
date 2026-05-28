@@ -1,4 +1,5 @@
 use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
+use stm32l4xx_hal::time::Hertz;
 
 use crate::clocking::{CurrentTime, I2CRtcCtrl, I2CRtcError};
 
@@ -36,10 +37,17 @@ impl<I2C: Write + Read + WriteRead + 'static> I2CRtcCtrl for ExtRtcType<I2C> {
         }
     }
 
-    fn set_alarm_period_ms(&mut self, period_ms: u32) -> Result<(), I2CRtcError> {
+    fn set_tick_period(&mut self, period: Hertz) -> Result<(), I2CRtcError> {
         match self {
-            ExtRtcType::Rx8130ce(rtc) => rtc.set_alarm_period_ms(period_ms),
-            ExtRtcType::Rv3028v7(rtc) => rtc.set_alarm_period_ms(period_ms),
+            ExtRtcType::Rx8130ce(rtc) => rtc.set_tick_period(period),
+            ExtRtcType::Rv3028v7(rtc) => rtc.set_tick_period(period),
+        }
+    }
+
+    fn dump_registers(&mut self) -> Result<(), I2CRtcError> {
+        match self {
+            ExtRtcType::Rx8130ce(rtc) => rtc.dump_registers(),
+            ExtRtcType::Rv3028v7(rtc) => rtc.dump_registers(),
         }
     }
 }

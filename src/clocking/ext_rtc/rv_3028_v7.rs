@@ -1,4 +1,5 @@
 use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
+use stm32l4xx_hal::time::Hertz;
 
 use crate::clocking::{CurrentTime, I2CRtcCtrl, I2CRtcError};
 
@@ -24,8 +25,8 @@ impl<I2C: Write + Read + WriteRead + 'static> I2CRtcCtrl for Rv3028v7<I2C> {
             let this = &mut *self;
             let data: &mut [u8] = &mut raw;
             this.i2c
-                    .write_read(RV3028V7_I2C_ADDR, &[REG_SECONDS], data)
-                    .map_err(|_| I2CRtcError::I2cReadError)
+                .write_read(RV3028V7_I2C_ADDR, &[REG_SECONDS], data)
+                .map_err(|_| I2CRtcError::I2cReadError)
         }?;
 
         Ok(CurrentTime {
@@ -58,12 +59,58 @@ impl<I2C: Write + Read + WriteRead + 'static> I2CRtcCtrl for Rv3028v7<I2C> {
             payload[0] = REG_SECONDS;
             payload[1..(data.len() + 1)].copy_from_slice(data);
             this.i2c
-                    .write(RV3028V7_I2C_ADDR, &payload[..(data.len() + 1)])
-                    .map_err(|_| I2CRtcError::I2cWriteError)
+                .write(RV3028V7_I2C_ADDR, &payload[..(data.len() + 1)])
+                .map_err(|_| I2CRtcError::I2cWriteError)
         }
     }
 
-    fn set_alarm_period_ms(&mut self, _period_ms: u32) -> Result<(), I2CRtcError> {
-        panic!("RV-3028-V7 periodic alarm is not implemented yet (architecture pending)");
+    fn set_tick_period(&mut self, period: Hertz) -> Result<(), I2CRtcError> {
+        const EEPROM_CLKOUT_REG: u8 = 0x1C;
+
+        #[derive(Clone, Copy)]
+        enum TickRate {
+            Hz32768 = 0b000,
+            Hz8192 = 0b001,
+            Hz1024 = 0b010,
+            Hz64 = 0b011,
+            Hz32 = 0b100,
+            Hz1 = 0b101,
+            Hz0 = 0b111,
+        }
+
+        impl TickRate {
+            pub fn mask() -> u8 {
+                0b111 << 0
+            }
+
+            pub fn to_bits(&self) -> u8 {
+                (*self as u8) << 0
+            }
+        }
+
+        let data = match period.to_Hz() {
+            32_768 => TickRate::Hz32768,
+            8_192 => TickRate::Hz8192,
+            1_024 => TickRate::Hz1024,
+            64 => TickRate::Hz64,
+            32 => TickRate::Hz32,
+            1 => TickRate::Hz1,
+            0 => TickRate::Hz0,
+            _ => return Err(I2CRtcError::UnsupportedSetting),
+        };
+
+        self.i2c
+            .write(RV3028V7_I2C_ADDR, &[EEPROM_CLKOUT_REG])
+            .map_err(|_| I2CRtcError::I2cWriteError)?;
+
+        let mut current = [0_u8; 1];
+        self.i2c
+            .read(RV3028V7_I2C_ADDR, &mut current)
+            .map_err(|_| I2CRtcError::I2cReadError)?;
+
+        let new_value = (current[0] & !TickRate::mask()) | data.to_bits() | (1 << 7); // Enable CLKOUT output
+        self.i2c
+            .write(RV3028V7_I2C_ADDR, &[EEPROM_CLKOUT_REG, new_value])
+            .map_err(|_| I2CRtcError::I2cWriteError)
     }
 }

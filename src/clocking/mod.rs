@@ -91,11 +91,17 @@ pub trait ClockConfigProvider {
 pub enum I2CRtcError {
     I2cReadError,
     I2cWriteError,
+    UnsupportedSetting,
 }
 
 pub trait I2CRtcCtrl {
     fn current_time(&mut self) -> Result<CurrentTime, I2CRtcError>;
     fn set_time(&mut self, time: CurrentTime) -> Result<(), I2CRtcError>;
 
-    fn set_alarm_period_ms(&mut self, period_ms: u32) -> Result<(), I2CRtcError>;
+    fn set_tick_period(&mut self, period: Hertz) -> Result<(), I2CRtcError>;
+
+    fn dump_registers(&mut self) -> Result<(), I2CRtcError> {
+        // Default implementation does nothing, as not all RTCs may support this
+        Ok(())
+    }
 }

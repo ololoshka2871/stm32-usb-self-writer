@@ -60,7 +60,9 @@ const RES_QUEUE_SIZE: usize = 192;
 
 #[app(device = stm32l4xx_hal::pac, peripherals = true, dispatchers = [RCC, LCD, TAMP_STAMP, SWPMI1])]
 mod app {
-    use super::*;
+    use stm32l4xx_hal::rcc::Enable;
+
+use super::*;
 
     #[shared]
     struct Shared {
@@ -333,15 +335,44 @@ mod app {
 
             match crate::init::try_init_external_rtc(rtc_i2c) {
                 Ok(mut ext_rtc) => {
-                    let rtc_time = ext_rtc.current_time().unwrap();
-                    defmt::info!("\tExternal RTC detected: {} [{}]", &ext_rtc, rtc_time);
+                    ext_rtc.set_tick_period(1.Hz()).unwrap();
+                    ext_rtc.dump_registers().unwrap();
 
-                    rtc.set_time(rtc_time);
-                    defmt::warn!("\tInternal RTC time set to match external RTC");
+                    let mut ext_rtc_time = ext_rtc.current_time().unwrap();
+                    defmt::info!("\tExternal RTC detected: {} [{}]", &ext_rtc, ext_rtc_time);
+
+                    let mut rtc_tick_pin = gpioc
+                        .pc2
+                        .into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                    rtc_tick_pin.make_interrupt_source(&mut dp.SYSCFG, &mut rcc.apb2);
+                    rtc_tick_pin.enable_interrupt(&mut dp.EXTI);
+                    rtc_tick_pin.trigger_on_edge(&mut dp.EXTI, stm32l4xx_hal::gpio::Edge::Rising);
+                    
+                    defmt::warn!(
+                        "\tWaiting for external RTC to tick to synchronize internal RTC with it..."
+                    );
+                    while ext_rtc_time.seconds == 59 {
+                        ext_rtc_time = ext_rtc.current_time().unwrap();
+                    }
+                    
+                    rtc_tick_pin.clear_interrupt_pending_bit();
+                    while !rtc_tick_pin.check_interrupt() {
+                        cortex_m::asm::delay(1_000);
+                    }
+                    rtc_tick_pin.clear_interrupt_pending_bit();
+                    
+                    ext_rtc_time.seconds += 1;
+                    rtc.set_time(ext_rtc_time);
+                    defmt::warn!(
+                        "\tInternal RTC time set to match external RTC: [{}]",
+                        ext_rtc_time
+                    );
                 }
                 Err(rtc_i2c) => {
                     defmt::info!("\tNo external RTC detected");
-                    let (_, (sda, scl)) = rtc_i2c.free();
+                    let (i2c, (sda, scl)) = rtc_i2c.free();
+                    stm32l4xx_hal::pac::I2C3::disable(&mut rcc.apb1r1);
+                    i2c.cr1.modify(|_, w| w.pe().clear_bit());
                     let _ = sda.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
                     let _ = scl.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
                 }
