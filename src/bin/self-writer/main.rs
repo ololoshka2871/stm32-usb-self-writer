@@ -624,12 +624,15 @@ mod app {
         rtc_sync.notify_all();
     }
 
-    #[task(binds = EXTI2, local = [rtc_tick_pin, counter: u32 = 0], priority = 2)]
+    #[task(binds = EXTI2, shared = [rtc], local = [ext_rtc, rtc_tick_pin, counter: u32 = 0], priority = 2)]
     fn rtc_tick(ctx: rtc_tick::Context) {
+        let ext_rtc = ctx.local.ext_rtc;
         let rtc_tick_pin = ctx.local.rtc_tick_pin;
         let counter = ctx.local.counter;
 
-        if let Some(rtc_tick_pin) = rtc_tick_pin {
+        let mut rtc = ctx.shared.rtc;
+
+        if let (Some(rtc_tick_pin), Some(ext_rtc)) = (rtc_tick_pin, ext_rtc) {
             if rtc_tick_pin.check_interrupt() {
                 rtc_tick_pin.clear_interrupt_pending_bit();
 
@@ -638,7 +641,13 @@ mod app {
                 if *counter == config::EXT_RTC_SYNC_PERIOD_S {
                     *counter = 0;
 
-                    sync_to_ext_rtc::spawn().ok();
+                    if let Ok(rtc_time) = ext_rtc.current_time() {
+                        defmt::info!("Sync to external clocks: {}", rtc_time);
+
+                        rtc.lock(|rtc| rtc.set_time(rtc_time));
+                    } else {
+                        defmt::warn!("Failed to get time from external RTC");
+                    }
                 }
             }
             return;
@@ -1279,18 +1288,18 @@ mod app {
         }
     }
 
-    #[task(local = [ext_rtc], priority = 2)]
-    async fn sync_to_ext_rtc(ctx: sync_to_ext_rtc::Context) {
-        let ext_rtc = ctx.local.ext_rtc;
-
-        if let Some(ext_rtc) = ext_rtc {
-            if let Ok(rtc_time) = ext_rtc.current_time() {
-                defmt::info!("Sync to external clocks: {}", rtc_time);
-            } else {
-                defmt::warn!("Failed to get time from external RTC");
-            }
-        } else {
-            defmt::error!("No external RTC to sync with");
-        }
-    }
+    //#[task(local = [ext_rtc], priority = 2)]
+    //async fn sync_to_ext_rtc(ctx: sync_to_ext_rtc::Context) {
+    //    let ext_rtc = ctx.local.ext_rtc;
+    //
+    //    if let Some(ext_rtc) = ext_rtc {
+    //        if let Ok(rtc_time) = ext_rtc.current_time() {
+    //            defmt::info!("Sync to external clocks: {}", rtc_time);
+    //        } else {
+    //            defmt::warn!("Failed to get time from external RTC");
+    //        }
+    //    } else {
+    //        defmt::error!("No external RTC to sync with");
+    //    }
+    //}
 }

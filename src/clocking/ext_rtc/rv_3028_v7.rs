@@ -12,9 +12,32 @@ pub struct Rv3028v7<I2C> {
     i2c: I2C,
 }
 
-impl<I2C> Rv3028v7<I2C> {
+impl<I2C: Write + Read + WriteRead + 'static> Rv3028v7<I2C> {
     pub fn new(i2c: I2C) -> Self {
-        Self { i2c }
+        let mut res = Self { i2c };
+        res.configure_bsm().unwrap();
+        res
+    }
+
+    fn configure_bsm(&mut self) -> Result<(), I2CRtcError> {
+        const EEPROM_BACKUP_REGISTER_REG: u8 = 0x37;
+        const BSM_MODE: u8 = 0b11 << 2;
+        const BSM_MODE_MASK: u8 = 0b11 << 2;
+        const TCE_MASK: u8 = 0b1 << 6;
+
+        let mut current = [0_u8; 1];
+        self.i2c
+            .write_read(
+                RV3028V7_I2C_ADDR,
+                &[EEPROM_BACKUP_REGISTER_REG],
+                &mut current,
+            )
+            .map_err(|_| I2CRtcError::I2cReadError)?;
+
+        let new_value = (current[0] & !BSM_MODE_MASK & !TCE_MASK) | BSM_MODE;
+        self.i2c
+            .write(RV3028V7_I2C_ADDR, &[EEPROM_BACKUP_REGISTER_REG, new_value])
+            .map_err(|_| I2CRtcError::I2cWriteError)
     }
 }
 
@@ -108,5 +131,21 @@ impl<I2C: Write + Read + WriteRead + 'static> I2CRtcCtrl for Rv3028v7<I2C> {
         self.i2c
             .write(RV3028V7_I2C_ADDR, &[EEPROM_CLKOUT_REG, new_value])
             .map_err(|_| I2CRtcError::I2cWriteError)
+    }
+
+    fn dump_registers(&mut self) -> Result<(), I2CRtcError> {
+        const START: u8 = 0x35;
+        let mut raw = [0_u8; 3];
+
+        self.i2c
+            .write_read(RV3028V7_I2C_ADDR, &[START], &mut raw)
+            .map_err(|_| I2CRtcError::I2cReadError)?;
+
+        defmt::info!("RV-3028-V7 RTC registers:");
+        for (i, byte) in raw.iter().enumerate() {
+            defmt::info!("Reg 0x{:02X}: 0b{:08b}", i + START as usize, byte);
+        }
+
+        Ok(())
     }
 }
