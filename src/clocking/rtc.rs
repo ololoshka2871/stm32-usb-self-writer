@@ -1,13 +1,15 @@
 use stm32l4xx_hal::{
     datetime::{Date, Hour, Micros, Minute, Second, Time, U32Ext},
+    gpio::{Alternate, PB2, PC13, PushPull},
     hal::timer::CountDown,
     pac::{self},
     pwr,
     rcc::{APB1R1, BDCR},
     rtc::{Event, Rtc, RtcClockSource, RtcConfig, RtcWakeupClockSource},
+    time::Hertz,
 };
 
-use super::CurrentTime;
+use super::{CurrentTime, RtcCalibrationOutput, RtcCalibrationOutputPin};
 
 const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
 const LSE_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
@@ -96,7 +98,7 @@ impl RtcService {
     }
 
     pub fn set_time(&mut self, time: CurrentTime) {
-        use stm32l4xx_hal::datetime::{Day, DateInMonth, Month, Year, Hour, Minute, Second, Time};
+        use stm32l4xx_hal::datetime::{DateInMonth, Day, Hour, Minute, Month, Second, Time, Year};
         self.rtc.set_date_time(
             Date::new(
                 Day(time.day_of_week),
@@ -167,3 +169,31 @@ fn select_rtc_clock_source() -> RtcClockSource {
 
     RtcClockSource::LSI
 }
+
+impl RtcCalibrationOutput for RtcService {
+    fn enable_calibration_output(
+        &mut self,
+        pin: impl Into<RtcCalibrationOutputPin>,
+        _frequency: Hertz,
+    ) -> Result<(), ()> {
+        let _pin = pin.into();
+
+        Ok(())
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+macro_rules! impl_rtc_calibration_output_pin {
+    ($($pin_type:ty),+ $(,)?) => {
+        $(
+            impl Into<RtcCalibrationOutputPin> for $pin_type {
+                fn into(self) -> RtcCalibrationOutputPin {
+                    RtcCalibrationOutputPin {}
+                }
+            }
+        )+
+    };
+}
+
+impl_rtc_calibration_output_pin!(PC13<Alternate<PushPull, 0>>, PB2<Alternate<PushPull, 0>>);

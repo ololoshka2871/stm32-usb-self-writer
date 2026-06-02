@@ -105,3 +105,15 @@ pub trait I2CRtcCtrl {
         Ok(())
     }
 }
+
+pub struct RtcCalibrationOutputPin {
+    // This struct can be expanded to include pin configuration if needed
+}
+
+pub trait RtcCalibrationOutput {
+    fn enable_calibration_output(
+        &mut self,
+        pin: impl Into<RtcCalibrationOutputPin>,
+        frequency: Hertz,
+    ) -> Result<(), ()>;
+}

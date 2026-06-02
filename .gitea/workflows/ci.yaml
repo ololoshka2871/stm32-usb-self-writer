@@ -31,7 +31,7 @@ jobs:
           cat .cargo/config.toml
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --bin self-writer
 
       - name: Create binary dist
         run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer self-writer.bin
