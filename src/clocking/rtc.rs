@@ -1,6 +1,6 @@
 use stm32l4xx_hal::{
     datetime::{Date, Hour, Micros, Minute, Second, Time, U32Ext},
-    gpio::{Alternate, PB2, PC13, PushPull},
+    gpio::{Alternate, Analog, PB2, PC13, PushPull},
     hal::timer::CountDown,
     pac::{self},
     pwr,
@@ -12,8 +12,8 @@ use stm32l4xx_hal::{
 use super::{CurrentTime, RtcCalibrationOutput, RtcCalibrationOutputPin};
 
 const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
-const LSE_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
-const LSI_STARTUP_TIMEOUT_CYCLES: usize = 200_000;
+const LSE_STARTUP_TIMEOUT_CYCLES: usize = 2000_000;
+const LSI_STARTUP_TIMEOUT_CYCLES: usize = 2000_000;
 
 pub struct RtcService {
     rtc: Rtc,
@@ -35,8 +35,8 @@ impl RtcService {
             RtcClockSource::LSE => RtcConfig::default()
                 .clock_config(RtcClockSource::LSE)
                 .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
-                .async_prescaler(31)
-                .sync_prescaler(1023),
+                .async_prescaler(63)
+                .sync_prescaler(511),
             _ => RtcConfig::default()
                 .clock_config(RtcClockSource::LSI)
                 .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
@@ -140,6 +140,18 @@ impl RtcService {
             _ => 32_000,
         }
     }
+
+    fn with_unlocked(&mut self, f: impl FnOnce(&stm32l4xx_hal::pac::rtc::RegisterBlock)) {
+        // RTC register writes are protected by a write protection mechanism that requires
+        // unlocking with specific keys. This function handles the unlocking and relocking.
+        let rtc = unsafe { &*pac::RTC::ptr() };
+        rtc.wpr.write(|w| unsafe { w.key().bits(0xCA) });
+        rtc.wpr.write(|w| unsafe { w.key().bits(0x53) });
+
+        f(rtc);
+
+        rtc.wpr.write(|w| unsafe { w.key().bits(0xFF) });
+    }
 }
 
 fn select_rtc_clock_source() -> RtcClockSource {
@@ -149,8 +161,9 @@ fn select_rtc_clock_source() -> RtcClockSource {
     pwr.cr1.modify(|_, w| w.dbp().set_bit());
     while pwr.cr1.read().dbp().bit_is_clear() {}
 
+    // Некоторые кварцы не запускаются при lsedrv < 0b10, или выдают нестабильную/неправильную частоту
     rcc.bdcr
-        .modify(|_, w| w.lsebyp().clear_bit().lseon().set_bit());
+        .modify(|_, w| unsafe { w.lsebyp().clear_bit().lseon().set_bit().lsedrv().bits(0b10) });
 
     for _ in 0..LSE_STARTUP_TIMEOUT_CYCLES {
         if rcc.bdcr.read().lserdy().bit_is_set() {
@@ -171,12 +184,31 @@ fn select_rtc_clock_source() -> RtcClockSource {
 }
 
 impl RtcCalibrationOutput for RtcService {
+    // FCAL = FRTCCLK x [1 + (CALP x 512 - CALM) / (220 + CALM - CALP x 512)]
+    // CALP - 1 бит - знак (0 - отрицательная коррекция, 1 - положительная коррекция)
+    // CALM - 9 бит - величина коррекции (0..=511) * 0.954 ppm
+    // Того без учета коррекции частота калибровоная 32768 / 220 = 148,9(45) Hz
     fn enable_calibration_output(
         &mut self,
         pin: impl Into<RtcCalibrationOutputPin>,
-        _frequency: Hertz,
+        frequency: Hertz,
     ) -> Result<(), ()> {
-        let _pin = pin.into();
+        let pin = pin.into();
+
+        let output_1hz = match frequency.to_Hz() {
+            512 => false,
+            2 => true,
+            _ => return Err(()),
+        };
+
+        self.with_unlocked(|rtc| {
+            // Configure the RTC output remap based on the pin used
+            rtc.or.modify(|_, w| w.rtc_out_rmp().bit(pin.is_remap()));
+
+            rtc.cr.modify(|_, w| unsafe {
+                w.osel().bits(0b00).cosel().bit(output_1hz).coe().set_bit()
+            });
+        });
 
         Ok(())
     }
@@ -185,15 +217,18 @@ impl RtcCalibrationOutput for RtcService {
 //-----------------------------------------------------------------------------
 
 macro_rules! impl_rtc_calibration_output_pin {
-    ($($pin_type:ty),+ $(,)?) => {
+    ($(($pin_type:ty, $remap:literal)),+ $(,)?) => {
         $(
             impl Into<RtcCalibrationOutputPin> for $pin_type {
                 fn into(self) -> RtcCalibrationOutputPin {
-                    RtcCalibrationOutputPin {}
+                    RtcCalibrationOutputPin::new($remap)
                 }
             }
         )+
     };
 }
 
-impl_rtc_calibration_output_pin!(PC13<Alternate<PushPull, 0>>, PB2<Alternate<PushPull, 0>>);
+impl_rtc_calibration_output_pin!(
+    (PC13<Analog>, false),
+    (PB2<Alternate<PushPull, 0>>, true)
+);

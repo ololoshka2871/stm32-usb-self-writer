@@ -38,13 +38,12 @@ mod app {
     use super::*;
 
     #[shared]
-    struct Shared {}
-
-    #[local]
-    struct Local {
-        //led: PC13<Alternate<PushPull, 0>>,
+    struct Shared {
         rtc: RtcService,
     }
+
+    #[local]
+    struct Local {}
 
     #[init]
     fn init(mut ctx: init::Context) -> (Shared, Local) {
@@ -77,36 +76,49 @@ mod app {
         Mono::start(ctx.core.SYST, clocks.hclk().to_Hz());
         defmt::info!("\tSysTick");
 
+        let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
         let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
 
-        let (mut rtc, _) = stm32_usb_self_writer::clocking::rtc::RtcService::init(
+        let (mut rtc, cs) = stm32_usb_self_writer::clocking::rtc::RtcService::init(
             dp.RTC,
             &mut dp.EXTI,
             &mut rcc.apb1r1,
             &mut rcc.bdcr,
             &mut pwr.cr1,
         );
+        rtc.set_alarm_period_ms(1_000);
         rtc.enable_calibration_output(
-            gpioc.pc13.into_alternate_push_pull(
-                &mut gpioc.moder,
-                &mut gpioc.otyper,
-                &mut gpioc.afrh,
-            ),
+            /*gpiob.pb2.into_alternate_push_pull(
+                &mut gpiob.moder,
+                &mut gpiob.otyper,
+                &mut gpiob.afrl,
+            ),*/
+            gpioc.pc13,
             stm32l4xx_hal::time::Hertz::Hz(512),
         )
         .unwrap();
 
-        defmt::info!("\tRTC");
+        defmt::info!("\tRTC: {}", defmt::Debug2Format(&cs));
 
         //---------------------------------------------------------------------
 
-        (Shared {}, Local { rtc })
+        (Shared { rtc }, Local {})
     }
 
     //-------------------------------------------------------------------------
 
-    #[task(binds = USART3, local = [rtc])]
+    #[task(binds = USART3, shared = [rtc])]
     fn uart3(ctx: uart3::Context) {
         /* TODO */
+    }
+
+    // Приоритет строго равен sync_freqmeter*, иначе Deadlock на мьютексе rtc_sync
+    #[task(binds = RTC_WKUP, shared = [rtc], priority = 4)]
+    fn rtc_alarm(ctx: rtc_alarm::Context) {
+        let mut rtc = ctx.shared.rtc;
+
+        rtc.lock(|rtc| rtc.handle_alarm_interrupt());
+
+        defmt::debug!("Alarm interrupt");
     }
 }

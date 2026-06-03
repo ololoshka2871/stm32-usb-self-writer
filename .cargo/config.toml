@@ -45,3 +45,9 @@ target = "thumbv7em-none-eabihf"     # Cortex-M4F and Cortex-M7F (with FPU)
 
 [env]
 DEFMT_LOG = "debug"
+
+[source.crates-io]
+replace-with = "crates-io-mirror"
+
+[registries.crates-io-mirror]
+index = "sparse+http://crates.sctbelpa:3080/index/"

@@ -106,8 +106,16 @@ pub trait I2CRtcCtrl {
     }
 }
 
-pub struct RtcCalibrationOutputPin {
-    // This struct can be expanded to include pin configuration if needed
+pub struct RtcCalibrationOutputPin(bool);
+
+impl RtcCalibrationOutputPin {
+    pub fn new(is_remap: bool) -> Self {
+        Self(is_remap)
+    }
+
+    pub fn is_remap(&self) -> bool {
+        self.0
+    }
 }
 
 pub trait RtcCalibrationOutput {
