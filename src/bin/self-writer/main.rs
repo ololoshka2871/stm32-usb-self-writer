@@ -30,7 +30,7 @@ use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
     InputChannel, RtcSync,
-    clocking::{I2CRtcCtrl, ext_rtc::ExtRtcType, rtc::RtcService},
+    clocking::rtc::{I2CRtcCtrl, ext_rtc::ExtRtcType, int_rtc::RtcService},
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,

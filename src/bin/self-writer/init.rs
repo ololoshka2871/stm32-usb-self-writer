@@ -99,9 +99,11 @@ pub fn init_rtc_service(
     apb1r1: &mut rcc::APB1R1,
     bdcr: &mut rcc::BDCR,
     pwrcr1: &mut pwr::CR1,
-) -> stm32_usb_self_writer::clocking::rtc::RtcService {
+) -> stm32_usb_self_writer::clocking::rtc::int_rtc::RtcService {
     let (mut rtc, rtc_clock_source) =
-        stm32_usb_self_writer::clocking::rtc::RtcService::init(rtc, exti, apb1r1, bdcr, pwrcr1);
+        stm32_usb_self_writer::clocking::rtc::int_rtc::RtcService::init(
+            rtc, exti, apb1r1, bdcr, pwrcr1,
+        );
 
     rtc.set_alarm_period_ms(base_period.to_millis() as u32);
     defmt::info!(
@@ -352,8 +354,8 @@ where
 
 pub fn try_init_external_rtc<I2C: i2c::Write + i2c::Read + i2c::WriteRead + 'static>(
     i2c: I2C,
-) -> Result<stm32_usb_self_writer::clocking::ext_rtc::ExtRtcType<I2C>, I2C> {
-    let rtc = stm32_usb_self_writer::clocking::ext_rtc::try_detect_i2c_rtc(i2c)?;
+) -> Result<stm32_usb_self_writer::clocking::rtc::ext_rtc::ExtRtcType<I2C>, I2C> {
+    let rtc = stm32_usb_self_writer::clocking::rtc::ext_rtc::try_detect_i2c_rtc(i2c)?;
 
     Ok(rtc)
 }

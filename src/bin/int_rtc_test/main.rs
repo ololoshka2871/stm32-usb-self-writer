@@ -12,7 +12,7 @@ use rtic::app;
 use rtic_monotonics::Monotonic;
 
 use stm32_usb_self_writer::{
-    clocking::{RtcCalibrationOutput, rtc::RtcService},
+    clocking::rtc::{RtcCalibrationOutput, int_rtc::RtcService},
     config,
 };
 
@@ -79,7 +79,7 @@ mod app {
         let mut gpiob = dp.GPIOB.split(&mut rcc.ahb2);
         let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
 
-        let (mut rtc, cs) = stm32_usb_self_writer::clocking::rtc::RtcService::init(
+        let (mut rtc, cs) = stm32_usb_self_writer::clocking::rtc::int_rtc::RtcService::init(
             dp.RTC,
             &mut dp.EXTI,
             &mut rcc.apb1r1,
