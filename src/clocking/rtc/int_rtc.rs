@@ -1,3 +1,5 @@
+use num_traits::float::FloatCore;
+
 use stm32l4xx_hal::{
     datetime::{Date, Hour, Micros, Minute, Second, Time, U32Ext},
     gpio::{Alternate, Analog, PB2, PC13, PushPull},
@@ -9,16 +11,21 @@ use stm32l4xx_hal::{
     time::Hertz,
 };
 
-use super::{CurrentTime, RtcCalibrationOutput, RtcCalibrationOutputPin};
+use super::{
+    CurrentTime, RtcCalibrationOutput, RtcCalibrationOutputPin, RtcTrimming, RtcTrimmingError,
+};
 
 const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
 const LSE_STARTUP_TIMEOUT_CYCLES: usize = 2000_000;
 const LSI_STARTUP_TIMEOUT_CYCLES: usize = 2000_000;
 
+const TRIMMING_ACCURACY_PPM: f32 = 0.954;
+
 pub struct RtcService {
     rtc: Rtc,
     rtc_clock_source: RtcClockSource,
     wakeup_ticks: Option<u32>,
+    last_calibration_error_ppm: f32,
 }
 
 impl RtcService {
@@ -35,8 +42,9 @@ impl RtcService {
             RtcClockSource::LSE => RtcConfig::default()
                 .clock_config(RtcClockSource::LSE)
                 .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
-                .async_prescaler(63)
-                .sync_prescaler(511),
+                // p. 35.3.4 Clock and prescalers
+                .async_prescaler(63) // <= 127
+                .sync_prescaler(511), // to count 2*miliseconds
             _ => RtcConfig::default()
                 .clock_config(RtcClockSource::LSI)
                 .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
@@ -66,6 +74,7 @@ impl RtcService {
                 rtc,
                 rtc_clock_source: source,
                 wakeup_ticks: None,
+                last_calibration_error_ppm: 0.0,
             },
             source,
         )
@@ -163,7 +172,7 @@ fn select_rtc_clock_source() -> RtcClockSource {
 
     // Некоторые кварцы не запускаются при lsedrv < 0b10, или выдают нестабильную/неправильную частоту
     rcc.bdcr
-        .modify(|_, w| unsafe { w.lsebyp().clear_bit().lseon().set_bit().lsedrv().bits(0b10) });
+        .modify(|_, w| unsafe { w.lsebyp().clear_bit().lseon().set_bit().lsedrv().bits(0b00) });
 
     for _ in 0..LSE_STARTUP_TIMEOUT_CYCLES {
         if rcc.bdcr.read().lserdy().bit_is_set() {
@@ -181,6 +190,50 @@ fn select_rtc_clock_source() -> RtcClockSource {
     }
 
     RtcClockSource::LSI
+}
+
+impl RtcTrimming for RtcService {
+    fn set_calibration(&mut self, calibration_ppm: f32) -> Result<(), RtcTrimmingError> {
+        let magnitude = (calibration_ppm + self.last_calibration_error_ppm) / TRIMMING_ACCURACY_PPM;
+        let magnitude_clamped = magnitude.clamp(-511.0, 512.0).round();
+        self.last_calibration_error_ppm = magnitude - magnitude_clamped;
+        let (calp, calm) = if magnitude_clamped >= 0.0 {
+            (true, magnitude_clamped as u16)
+        } else {
+            (false, (-magnitude_clamped) as u16)
+        };
+
+        self.with_unlocked(|rtc| {
+            rtc.calr.modify(|_, w| unsafe {
+                w.calp()
+                    .bit(calp)
+                    .calm()
+                    .bits(calm)
+                    .calw16()
+                    .clear_bit()
+                    .calw8()
+                    .clear_bit()
+            });
+        });
+
+        defmt::debug!(
+            "RTC calibration: {} ppm ({}, error {} ppm)",
+            calibration_ppm,
+            calm,
+            self.last_calibration_error_ppm
+        );
+
+        Ok(())
+    }
+
+    fn get_calibration(&self) -> f32 {
+        let rtc = unsafe { &*pac::RTC::ptr() };
+        let calib = rtc.calr.read();
+        let sign = if calib.calp().bit_is_set() { 1.0 } else { -1.0 };
+        let magnitude = calib.calm().bits() as f32;
+
+        sign * magnitude * TRIMMING_ACCURACY_PPM + self.last_calibration_error_ppm
+    }
 }
 
 impl RtcCalibrationOutput for RtcService {

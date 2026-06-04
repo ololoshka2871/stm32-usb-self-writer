@@ -3,7 +3,6 @@ pub mod int_rtc;
 
 use stm32l4xx_hal::time::Hertz;
 
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CurrentTime {
     pub year: u32,
@@ -104,4 +103,15 @@ pub trait RtcCalibrationOutput {
         pin: impl Into<RtcCalibrationOutputPin>,
         frequency: Hertz,
     ) -> Result<(), ()>;
+}
+
+#[derive(Clone, Copy, Debug, defmt::Format)]
+pub enum RtcTrimmingError {
+    Unsupported,
+    InvalidCalibrationValue,
+}
+
+pub trait RtcTrimming {
+    fn set_calibration(&mut self, calibration_ppm: f32) -> Result<(), RtcTrimmingError>;
+    fn get_calibration(&self) -> f32;
 }
