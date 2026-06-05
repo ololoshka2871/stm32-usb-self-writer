@@ -42,7 +42,7 @@ impl RtcService {
             RtcClockSource::LSE => RtcConfig::default()
                 .clock_config(RtcClockSource::LSE)
                 .wakeup_clock_config(RtcWakeupClockSource::RtcClkDiv16)
-                // p. 35.3.4 Clock and prescalers
+                // p. 35.3.4 Clock and prescalers (127 / 255)
                 .async_prescaler(63) // <= 127
                 .sync_prescaler(511), // to count 2*miliseconds
             _ => RtcConfig::default()
@@ -198,13 +198,13 @@ impl RtcTrimming for RtcService {
         let magnitude_clamped = magnitude.clamp(-511.0, 512.0).round();
         self.last_calibration_error_ppm = magnitude - magnitude_clamped;
         let (calp, calm) = if magnitude_clamped >= 0.0 {
-            (true, magnitude_clamped as u16)
+            (false, magnitude_clamped as u16)
         } else {
-            (false, (-magnitude_clamped) as u16)
+            (true, 512 - (magnitude_clamped as i16) as u16)
         };
 
         self.with_unlocked(|rtc| {
-            rtc.calr.modify(|_, w| unsafe {
+            rtc.calr.write(|w| unsafe {
                 w.calp()
                     .bit(calp)
                     .calm()
