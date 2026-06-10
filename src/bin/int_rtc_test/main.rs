@@ -6,7 +6,12 @@ extern crate alloc;
 use defmt_rtt as _; // global logger
 use panic_abort as _;
 
-use stm32l4xx_hal::{pac, prelude::*, serial};
+use stm32l4xx_hal::{
+    adc::{self, Resolution, SampleTime, Temperature, Vref, ADC},
+    pac,
+    prelude::*,
+    serial,
+};
 
 use embedded_hal::serial::Write;
 
@@ -48,6 +53,9 @@ mod app {
     struct Local {
         uart3_rx: serial::Rx<pac::USART3>,
         uart3_tx: serial::Tx<pac::USART3>,
+        adc: ADC,
+        tcpu_ch: Temperature,
+        v_ref: Vref,
     }
 
     fn uart_write<E, UART: Write<u8, Error = E>>(tx: &mut UART, data: &[u8]) -> Result<(), E> {
@@ -97,6 +105,29 @@ mod app {
 
         let mut _gpiob = dp.GPIOB.split(&mut rcc.ahb2);
         let mut gpioc = dp.GPIOC.split(&mut rcc.ahb2);
+
+        let (adc, tcpu_ch, v_ref) = {
+            let mut delay = stm32_usb_self_writer::NOPDelay {
+                sys_clk: clocks.sysclk(),
+            };
+
+            let mut adc = adc::ADC::new(
+                dp.ADC1,
+                dp.ADC_COMMON,
+                &mut rcc.ahb2,
+                &mut rcc.ccipr,
+                &mut delay,
+            );
+            adc.set_sample_time(SampleTime::Cycles640_5);
+            adc.set_resolution(Resolution::Bits12);
+
+            let tcpu_ch = adc.enable_temperature(&mut delay);
+            let v_ref = adc.enable_vref(&mut delay);
+
+            (adc, tcpu_ch, v_ref)
+        };
+
+        defmt::info!("\tADC");
 
         let (uart3_rx, uart3_tx) = {
             let tx_pin =
@@ -150,7 +181,16 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        (Shared { rtc }, Local { uart3_rx, uart3_tx })
+        (
+            Shared { rtc },
+            Local {
+                uart3_rx,
+                uart3_tx,
+                adc,
+                tcpu_ch,
+                v_ref,
+            },
+        )
     }
 
     //-------------------------------------------------------------------------
@@ -236,15 +276,47 @@ mod app {
         }
     }
 
-    #[task(binds = RTC_WKUP, shared = [rtc], priority = 4)]
+    #[task(
+        binds = RTC_WKUP,
+        shared = [rtc],
+        local = [counter: u32 = 0, adc, tcpu_ch, v_ref],
+        priority = 4
+    )]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
+        const TRIMMING_COEFFS: [f32; 3] = [
+            159.17595, // T^0
+            1.31706, // T^1
+            -0.03900,  // T^2
+        ];
+
         let mut rtc = ctx.shared.rtc;
+        let counter = ctx.local.counter;
+        let adc = ctx.local.adc;
+        let tcpu_ch = ctx.local.tcpu_ch;
+        let v_ref = ctx.local.v_ref;
 
         let now = rtc.lock(|rtc| {
             rtc.handle_alarm_interrupt();
             rtc.current_time()
         });
 
-        defmt::debug!("Alarm interrupt: {}", now);
+        if *counter % 8 == 0 {
+            adc.calibrate(v_ref);
+
+            let temp_raw = adc.read(tcpu_ch).unwrap_or(0);
+            let temp_c = adc.to_degrees_centigrade(temp_raw);
+
+            let correction = TRIMMING_COEFFS[0] + temp_c * (TRIMMING_COEFFS[1] + temp_c * TRIMMING_COEFFS[2]);
+
+            defmt::info!("CPU temp: {=f32} C (raw={=u16}), correction={}", temp_c, temp_raw, correction);
+
+            // apply correction to RTC
+            rtc.lock(|rtc| {
+                if let Err(err) = rtc.set_calibration(correction) {
+                    defmt::error!("Failed to set RTC calibration: {:?}", err);
+                }
+            });
+        }
+        *counter += 1;
     }
 }
