@@ -102,6 +102,7 @@ pub trait RtcCalibrationOutput {
         &mut self,
         pin: impl Into<RtcCalibrationOutputPin>,
         frequency: Hertz,
+        push_pull: bool,
     ) -> Result<(), ()>;
 }
 

@@ -16,7 +16,7 @@ use super::{
 };
 
 const RTC_INIT_MARKER: u32 = 0xA5A5_5A5A;
-const LSE_STARTUP_TIMEOUT_CYCLES: usize = 2000_000;
+const LSE_STARTUP_TIMEOUT_CYCLES: usize = 20000_000;
 const LSI_STARTUP_TIMEOUT_CYCLES: usize = 2000_000;
 
 const TRIMMING_ACCURACY_PPM: f32 = 0.954;
@@ -245,10 +245,11 @@ impl RtcCalibrationOutput for RtcService {
         &mut self,
         pin: impl Into<RtcCalibrationOutputPin>,
         frequency: Hertz,
+        push_pull: bool,
     ) -> Result<(), ()> {
         let pin = pin.into();
 
-        let output_1hz = match frequency.to_Hz() {
+        let output_is_1hz = match frequency.to_Hz() {
             512 => false,
             2 => true,
             _ => return Err(()),
@@ -256,10 +257,20 @@ impl RtcCalibrationOutput for RtcService {
 
         self.with_unlocked(|rtc| {
             // Configure the RTC output remap based on the pin used
-            rtc.or.modify(|_, w| w.rtc_out_rmp().bit(pin.is_remap()));
+            rtc.or.modify(|_, w| {
+                w.rtc_out_rmp()
+                    .bit(pin.is_remap())
+                    .rtc_alarm_type()
+                    .bit(push_pull)
+            });
 
             rtc.cr.modify(|_, w| unsafe {
-                w.osel().bits(0b00).cosel().bit(output_1hz).coe().set_bit()
+                w.osel()
+                    .bits(0b00)
+                    .cosel()
+                    .bit(output_is_1hz)
+                    .coe()
+                    .set_bit()
             });
         });
 

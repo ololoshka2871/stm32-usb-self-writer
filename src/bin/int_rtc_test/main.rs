@@ -7,7 +7,7 @@ use defmt_rtt as _; // global logger
 use panic_abort as _;
 
 use stm32l4xx_hal::{
-    adc::{self, Resolution, SampleTime, Temperature, Vref, ADC},
+    adc::{self, ADC, Resolution, SampleTime, Temperature, Vref},
     pac,
     prelude::*,
     serial,
@@ -172,8 +172,8 @@ mod app {
                 .pb2
                 .into_alternate_push_pull(&mut _gpiob.moder, &mut _gpiob.otyper, &mut _gpiob.afrl)
                 .set_speed(stm32l4xx_hal::gpio::Speed::Low),
-            //gpioc.pc13,
             stm32l4xx_hal::time::Hertz::Hz(512),
+            true,
         )
         .unwrap();
 
@@ -285,7 +285,7 @@ mod app {
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         const TRIMMING_COEFFS: [f32; 3] = [
             159.17595, // T^0
-            1.31706, // T^1
+            1.31706,   // T^1
             -0.03900,  // T^2
         ];
 
@@ -295,7 +295,7 @@ mod app {
         let tcpu_ch = ctx.local.tcpu_ch;
         let v_ref = ctx.local.v_ref;
 
-        let now = rtc.lock(|rtc| {
+        let _now = rtc.lock(|rtc| {
             rtc.handle_alarm_interrupt();
             rtc.current_time()
         });
@@ -306,9 +306,15 @@ mod app {
             let temp_raw = adc.read(tcpu_ch).unwrap_or(0);
             let temp_c = adc.to_degrees_centigrade(temp_raw);
 
-            let correction = TRIMMING_COEFFS[0] + temp_c * (TRIMMING_COEFFS[1] + temp_c * TRIMMING_COEFFS[2]);
+            let correction =
+                TRIMMING_COEFFS[0] + temp_c * (TRIMMING_COEFFS[1] + temp_c * TRIMMING_COEFFS[2]);
 
-            defmt::info!("CPU temp: {=f32} C (raw={=u16}), correction={}", temp_c, temp_raw, correction);
+            defmt::info!(
+                "CPU temp: {=f32} C (raw={=u16}), correction={}",
+                temp_c,
+                temp_raw,
+                correction
+            );
 
             // apply correction to RTC
             rtc.lock(|rtc| {

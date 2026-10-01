@@ -68,7 +68,7 @@ mod app {
 
     #[shared]
     struct Shared {
-        led: types::Led,
+        led: Option<types::Led>,
         rtc: RtcService,
         base_period: config::Duration,
         f1_base_period_devider: u32,
@@ -322,7 +322,7 @@ mod app {
             )
         };
 
-        let (ext_rtc, rtc_tick_pin) = {
+        let (ext_rtc, rtc_tick_pin, led) = {
             let mut sda = gpioc.pc0.into_alternate_open_drain(
                 &mut gpioc.moder,
                 &mut gpioc.otyper,
@@ -344,6 +344,13 @@ mod app {
                     stm32l4xx_hal::i2c::Config::new(100_u32.kHz(), clocks),
                     &mut rcc.apb1r1,
                 );
+
+            let led = gpiob.pb2.into_push_pull_output_in_state(
+                &mut gpiob.moder,
+                &mut gpiob.otyper,
+                config::LED_DISABLE,
+            );
+            defmt::info!("\tLED");
 
             match crate::init::try_init_external_rtc(rtc_i2c) {
                 Ok(mut ext_rtc) => {
@@ -380,7 +387,7 @@ mod app {
                         ext_rtc_time
                     );
 
-                    (Some(ext_rtc), Some(rtc_tick_pin))
+                    (Some(ext_rtc), Some(rtc_tick_pin), Some(led))
                 }
                 Err(rtc_i2c) => {
                     defmt::info!("\tNo external RTC detected");
@@ -390,7 +397,30 @@ mod app {
                     let _ = sda.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
                     let _ = scl.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
-                    (None, None)
+                    let led = if fast_mode
+                    /* && TODO: if enabled in settings */
+                    {
+                        use stm32_usb_self_writer::clocking::rtc::RtcCalibrationOutput;
+
+                        rtc.enable_calibration_output(
+                            led.into_alternate_push_pull(
+                                &mut gpiob.moder,
+                                &mut gpiob.otyper,
+                                &mut gpiob.afrl,
+                            ),
+                            stm32l4xx_hal::time::Hertz::Hz(config::EXT_RTC_CALIBRATION_FREQ_HZ),
+                            true,
+                        )
+                        .expect("Failed to enable internal RTC calibration output!");
+
+                        defmt::warn!("\tInternal RTC calibration output enabled (LED replaced)");
+
+                        None
+                    } else {
+                        Some(led)
+                    };
+
+                    (None, None, led)
                 }
             }
         };
@@ -462,13 +492,6 @@ mod app {
 
         let (self_writer_data_tx, self_writer_data_rx) =
             rtic_sync::make_channel!(types::DatItem, RES_QUEUE_SIZE);
-
-        let led = gpioc.pc10.into_push_pull_output_in_state(
-            &mut gpioc.moder,
-            &mut gpioc.otyper,
-            config::LED_DISABLE,
-        );
-        defmt::info!("\tLED");
 
         //---------------------------------------------------------------------
 
@@ -879,9 +902,9 @@ mod app {
         });
 
         loop {
-            led.lock(|led| led.set_state(config::LED_DISABLE));
+            led.lock(|led| led.as_mut().map(|led| led.set_state(config::LED_DISABLE)));
             Mono::timeout_after(wait, usb_notify.wait()).await.ok();
-            led.lock(|led| led.set_state(config::LED_ENABLE));
+            led.lock(|led| led.as_mut().map(|led| led.set_state(config::LED_ENABLE)));
 
             wait = long_wait; // default response
 
@@ -1223,7 +1246,7 @@ mod app {
                 });
 
                 #[cfg(feature = "led-blink-each-block")]
-                led.lock(|led| led.set_state(config::LED_ENABLE));
+                led.lock(|led| led.as_mut().map(|led| led.set_state(config::LED_ENABLE)));
 
                 match storage_context.write_next_block(data.as_slice()) {
                     Ok(abs_id) => {
@@ -1235,7 +1258,7 @@ mod app {
                 }
 
                 #[cfg(feature = "led-blink-each-block")]
-                led.lock(|led| led.set_state(config::LED_DISABLE));
+                led.lock(|led| led.as_mut().map(|led| led.set_state(config::LED_DISABLE)));
 
                 if storage_context.used_blocks() >= storage_context.total_blocks() {
                     impls::halt_device("Self-writer storage is full");
@@ -1253,9 +1276,9 @@ mod app {
 
         defmt::info!("+ Startup Signal +");
         for _ in 0..config::START_BLINK_COUNT {
-            led.lock(|led| led.set_state(config::LED_ENABLE));
+            led.lock(|led| led.as_mut().map(|led| led.set_state(config::LED_ENABLE)));
             Mono::delay(config::Duration::millis(config::START_BLINK_PERIOD_MS / 2)).await;
-            led.lock(|led| led.set_state(config::LED_DISABLE));
+            led.lock(|led| led.as_mut().map(|led| led.set_state(config::LED_DISABLE)));
             Mono::delay(config::Duration::millis(config::START_BLINK_PERIOD_MS / 2)).await;
         }
 

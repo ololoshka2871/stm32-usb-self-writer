@@ -2,7 +2,7 @@
 
 #[allow(unused_imports)]
 use stm32l4xx_hal::gpio::{
-    Alternate, Analog, Output, PA0, PA1, PA2, PA3, PA6, PA7, PA8, PB0, PB1, PC10, PD10, PD11, PD13,
+    Alternate, Analog, Output, PA0, PA1, PA2, PA3, PA6, PA7, PA8, PB0, PB1, PB2, PD10, PD11, PD13,
     PE12, PushPull,
 };
 
@@ -52,7 +52,7 @@ pub type Flash1Io1 = PB1<Alternate<PushPull, 10>>;
 #[cfg(not(feature = "no-flash"))]
 pub type FlashResetPin = PD11<Output<PushPull>>;
 
-pub type Led = PC10<Output<PushPull>>;
+pub type Led = PB2<Output<PushPull>>;
 
 //-----------------------------------------------------------------------------
 

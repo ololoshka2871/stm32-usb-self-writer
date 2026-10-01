@@ -86,3 +86,6 @@ pub const STORAGE_BLOCK_SIZE_BYTES: u32 = 4096;
 
 // Период синхронизации с внешними часами в секундах
 pub const EXT_RTC_SYNC_PERIOD_S: u32 = 30;
+
+// Частота генерируемая часами для калибровки RTC
+pub const EXT_RTC_CALIBRATION_FREQ_HZ: u32 = 512;
