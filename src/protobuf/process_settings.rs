@@ -70,11 +70,7 @@ fn verify_parameters(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
 ) -> Result<(), SettingActionError<String>> {
-    let mut password_invalid = false;
-    with_settings(&mut |(ws, ts)| {
-        password_invalid = ws.password != ts.current_password;
-        (false, false)
-    });
+    let password_invalid = is_password_invalid(with_settings);
 
     let deny_if_password_invalid = move |parameter: &str| {
         if password_invalid {
@@ -235,6 +231,19 @@ fn verify_parameters(
     Ok(())
 }
 
+fn is_password_invalid(
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> bool {
+    let mut password_invalid = false;
+    with_settings(&mut |(ws, ts)| {
+        password_invalid = ws.password != ts.current_password;
+        (false, false)
+    });
+    password_invalid
+}
+
 pub fn update_settings(
     w: &super::messages::WriteSettingsReq,
     with_settings: &mut impl FnMut(
@@ -385,6 +394,17 @@ pub fn update_rtc_control(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
 ) -> Result<bool, SettingActionError<String>> {
+    let password_invalid = is_password_invalid(with_settings);
+
+    let mut write_required = req.mode.is_some();
+    if let Some(coeffs) = &req.trimming_coefficients {
+        write_required |= coeffs.tr0.is_some() | coeffs.tr1.is_some() | coeffs.tr2.is_some();
+    }
+
+    if password_invalid && write_required {
+        return Err(SettingActionError::new("Invalid password".to_string()));
+    }
+
     Ok(with_settings(&mut |(ws, _)| {
         let mut need_write = false;
 
@@ -395,10 +415,18 @@ pub fn update_rtc_control(
         }
 
         if let Some(coeffs) = &req.trimming_coefficients {
-            ws.rtc_trimming_coeffs.tr0 = coeffs.tr0;
-            ws.rtc_trimming_coeffs.tr1 = coeffs.tr1;
-            ws.rtc_trimming_coeffs.tr2 = coeffs.tr2;
-            need_write = true;
+            if let Some(v) = coeffs.tr0 {
+                ws.rtc_trimming_coeffs.tr0 = v;
+                need_write = true;
+            }
+            if let Some(v) = coeffs.tr1 {
+                ws.rtc_trimming_coeffs.tr1 = v;
+                need_write = true;
+            }
+            if let Some(v) = coeffs.tr2 {
+                ws.rtc_trimming_coeffs.tr2 = v;
+                need_write = true;
+            }
         }
 
         (need_write, need_write)

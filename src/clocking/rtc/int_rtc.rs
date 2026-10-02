@@ -217,7 +217,7 @@ impl RtcTrimming for RtcService {
         });
 
         defmt::debug!(
-            "RTC calibration: {} ppm ({}, error {} ppm)",
+            "RTC calibration: {} ppm (value={}, error={} ppm)",
             calibration_ppm,
             calm,
             self.last_calibration_error_ppm
