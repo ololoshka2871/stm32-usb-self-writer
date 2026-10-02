@@ -102,14 +102,14 @@ pub struct WriteConfig {
 #[derive(Debug, Copy, Clone, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct RtcTrimmingCoeffs {
-    pub t0: f32,
-    pub t1: f32,
-    pub t2: f32,
+    pub tr0: f32,
+    pub tr1: f32,
+    pub tr2: f32,
 }
 
 impl RtcTrimmingCoeffs {
     pub fn calculate_trimming(&self, t: f32) -> f32 {
-        self.t0 + t * (self.t1 + t * self.t2)
+        self.tr0 + t * (self.tr1 + t * self.tr2)
     }
 }
 

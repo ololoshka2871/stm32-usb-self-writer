@@ -75,9 +75,9 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
 
     rtc_trimming_mode: app_settings::RtcTrimmingMode::Off,
     rtc_trimming_coeffs: app_settings::RtcTrimmingCoeffs {
-        t0: 0.0,
-        t1: 0.0,
-        t2: 0.0,
+        tr0: 0.0,
+        tr1: 0.0,
+        tr2: 0.0,
     },
 
     password: *b"_PASSWORD_",

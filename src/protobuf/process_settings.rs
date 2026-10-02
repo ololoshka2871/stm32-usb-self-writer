@@ -395,9 +395,9 @@ pub fn update_rtc_control(
         }
 
         if let Some(coeffs) = &req.trimming_coefficients {
-            ws.rtc_trimming_coeffs.t0 = coeffs.t0;
-            ws.rtc_trimming_coeffs.t1 = coeffs.t1;
-            ws.rtc_trimming_coeffs.t2 = coeffs.t2;
+            ws.rtc_trimming_coeffs.tr0 = coeffs.tr0;
+            ws.rtc_trimming_coeffs.tr1 = coeffs.tr1;
+            ws.rtc_trimming_coeffs.tr2 = coeffs.tr2;
             need_write = true;
         }
 
