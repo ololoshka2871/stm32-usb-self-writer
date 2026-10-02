@@ -1,7 +1,7 @@
 use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
 use stm32l4xx_hal::time::Hertz;
 
-use crate::clocking::{CurrentTime, I2CRtcCtrl, I2CRtcError};
+use crate::clocking::rtc::{CurrentTime, I2CRtcCtrl, I2CRtcError};
 
 use super::{bcd2dec, dec2bcd};
 

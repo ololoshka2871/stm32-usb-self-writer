@@ -10,7 +10,7 @@ pub const XTAL_FREQ: u32 = 12_000_000;
 
 pub const HIGH_PERF_CPU_FREQ: u32 = 80_000_000;
 pub const SELF_WRITER_CPU_FREQ: u32 = 3_000_000;
-pub const HW_VERSION: u32 = 1;
+pub const HW_VERSION: u32 = 0x02010000;
 pub const SYST_TIMER_HZ: u32 = 1_000;
 
 pub type Duration = rtic_monotonics::fugit::Duration<u32, 1, { SYST_TIMER_HZ }>;
@@ -85,4 +85,10 @@ pub const STORAGE_BLOCK_SIZE_BYTES: u32 = 4096;
 //-----------------------------------------------------------------------------
 
 // Период синхронизации с внешними часами в секундах
-pub const EXT_RTC_SYNC_PERIOD_S: u32 = 30;
+pub const EXT_RTC_SYNC_PERIOD_S: u32 = 60;
+
+// Частота генерируемая часами для калибровки RTC
+pub const EXT_RTC_CALIBRATION_FREQ_HZ: u32 = 512;
+
+// Период обновления тримминга RTC в секундах (FIXME: >= 32 секунды)
+pub const RTC_TRIMM_PERIOD_S: u32 = 5;

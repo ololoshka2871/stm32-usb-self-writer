@@ -1,5 +1,3 @@
-use core::usize;
-
 use alloc::{
     format,
     string::{String, ToString},
@@ -8,6 +6,7 @@ use alloc::{
 use my_proc_macro::store_coeff;
 
 use crate::{
+    clocking::rtc::CurrentTime,
     config,
     protobuf::PASSWORD_SIZE,
     settings::{self, SettingActionError},
@@ -72,11 +71,7 @@ fn verify_parameters(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
 ) -> Result<(), SettingActionError<String>> {
-    let mut password_invalid = false;
-    with_settings(&mut |(ws, ts)| {
-        password_invalid = ws.password != ts.current_password;
-        (false, false)
-    });
+    let password_invalid = is_password_invalid(with_settings);
 
     let deny_if_password_invalid = move |parameter: &str| {
         if password_invalid {
@@ -237,6 +232,19 @@ fn verify_parameters(
     Ok(())
 }
 
+fn is_password_invalid(
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> bool {
+    let mut password_invalid = false;
+    with_settings(&mut |(ws, ts)| {
+        password_invalid = ws.password != ts.current_password;
+        (false, false)
+    });
+    password_invalid
+}
+
 pub fn update_settings(
     w: &super::messages::WriteSettingsReq,
     with_settings: &mut impl FnMut(
@@ -363,4 +371,110 @@ pub fn update_settings(
     } else {
         Ok(res)
     }
+}
+
+pub fn fill_rtc_control(
+    rtc_resp: &mut messages::RtcControlResponse,
+    current_trimming_ppm: f32,
+    current_time: CurrentTime,
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) {
+    with_settings(&mut |(ws, _)| {
+        rtc_resp.current_mode = ws.rtc_trimming_mode as i32;
+        rtc_resp.trimming_coefficients = ws.rtc_trimming_coeffs.into();
+        rtc_resp.current_trimming_ppm = current_trimming_ppm;
+        rtc_resp.current_time = current_time.into();
+
+        (false, false)
+    });
+}
+
+pub fn parse_rtc_time(time: &messages::RtcTime) -> Result<CurrentTime, SettingActionError<String>> {
+    let current_time = CurrentTime {
+        year: time.year,
+        month: time.month,
+        day_of_month: time.day_of_month,
+        day_of_week: time.day_of_week,
+        hours: time.hours,
+        minutes: time.minutes,
+        seconds: time.seconds,
+        milliseconds: time.milliseconds,
+    };
+
+    if current_time.month < 1 || current_time.month > 12 {
+        return Err(SettingActionError::new("RTC Month must be in 1..=12".to_string()));
+    }
+    if current_time.day_of_month < 1 || current_time.day_of_month > 31 {
+        return Err(SettingActionError::new(
+            "RTC DayOfMonth must be in 1..=31".to_string(),
+        ));
+    }
+    if current_time.day_of_week < 1 || current_time.day_of_week > 7 {
+        return Err(SettingActionError::new(
+            "RTC DayOfWeek must be in 1..=7".to_string(),
+        ));
+    }
+    if current_time.hours > 23 {
+        return Err(SettingActionError::new("RTC Hours must be in 0..=23".to_string()));
+    }
+    if current_time.minutes > 59 {
+        return Err(SettingActionError::new("RTC Minutes must be in 0..=59".to_string()));
+    }
+    if current_time.seconds > 59 {
+        return Err(SettingActionError::new("RTC Seconds must be in 0..=59".to_string()));
+    }
+    if current_time.milliseconds > 999 {
+        return Err(SettingActionError::new(
+            "RTC Milliseconds must be in 0..=999".to_string(),
+        ));
+    }
+
+    Ok(current_time)
+}
+
+pub fn update_rtc_control(
+    req: &super::messages::RtcControlReq,
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> Result<bool, SettingActionError<String>> {
+    let password_invalid = is_password_invalid(with_settings);
+
+    let mut write_required = req.mode.is_some();
+    if let Some(coeffs) = &req.trimming_coefficients {
+        write_required |= coeffs.tr0.is_some() | coeffs.tr1.is_some() | coeffs.tr2.is_some();
+    }
+
+    if password_invalid && write_required {
+        return Err(SettingActionError::new("Invalid password".to_string()));
+    }
+
+    Ok(with_settings(&mut |(ws, _)| {
+        let mut need_write = false;
+
+        if let Some(mode) = &req.mode {
+            ws.rtc_trimming_mode =
+                num::FromPrimitive::from_i32(*mode).unwrap_or(settings::RtcTrimmingMode::Off);
+            need_write = true;
+        }
+
+        if let Some(coeffs) = &req.trimming_coefficients {
+            if let Some(v) = coeffs.tr0 {
+                ws.rtc_trimming_coeffs.tr0 = v;
+                need_write = true;
+            }
+            if let Some(v) = coeffs.tr1 {
+                ws.rtc_trimming_coeffs.tr1 = v;
+                need_write = true;
+            }
+            if let Some(v) = coeffs.tr2 {
+                ws.rtc_trimming_coeffs.tr2 = v;
+                need_write = true;
+            }
+        }
+
+        (need_write, need_write)
+    }))
 }

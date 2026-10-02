@@ -27,14 +27,18 @@ jobs:
           echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
           cat .cargo/config.toml
 
+      - name: Build RTC calibration test
+        run: |
+          cargo build --release --features "xtal-12mhz,force-defmt-logs" --bin int_rtc_test
+
       - name: Build 24MHz xtal version
         run: |
-          cargo build --release --features "xtal-24mhz"
+          cargo build --release --features "xtal-24mhz" --bin self-writer
 
       - name: Build 12MHz xtal version
         run: |
-          cargo build --release --features "xtal-12mhz"
+          cargo build --release --features "xtal-12mhz" --bin self-writer
 
       - name: Build no-flash version
         run: |
-          cargo build --release --features "xtal-24mhz,no-flash"
+          cargo build --release --features "xtal-24mhz,no-flash" --bin self-writer

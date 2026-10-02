@@ -5,6 +5,7 @@ use alloc::{boxed::Box, vec::Vec};
 use rtic_sync::channel::{NoReceiver, ReceiveError, Receiver, Sender};
 
 use stm32_usb_self_writer::{
+    clocking::rtc::CurrentTime,
     main_data_storage::StorageMetaHandle,
     protobuf::{self, AsyncStream},
     settings,
@@ -68,6 +69,8 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
     output: &mut Sender<'static, Vec<u8>, N>,
     timestamp_getter: impl Fn() -> u32,
     output_getter: &mut impl FnMut() -> OutputStorage,
+    rtc_trimming_getter: &mut impl FnMut() -> f32,
+    rtc_time_exchange: &mut impl FnMut(Option<CurrentTime>) -> CurrentTime,
     with_settings: &mut impl FnMut(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
@@ -85,6 +88,8 @@ pub async fn process_protobuf<IE: Debug, IS: AsyncStream<IE>, const N: usize>(
         &request,
         &mut response,
         output_getter,
+        rtc_trimming_getter,
+        rtc_time_exchange,
         with_settings,
         storage_meta,
     );

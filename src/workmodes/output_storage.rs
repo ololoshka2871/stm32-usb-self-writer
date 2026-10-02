@@ -1,4 +1,4 @@
-use crate::clocking::CurrentTime;
+use crate::clocking::rtc::CurrentTime;
 
 const CHANNEL_COUNT: usize = 2;
 
