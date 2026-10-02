@@ -18,4 +18,10 @@
         "--release",
         "--features=\"xtal-24mhz,maket\""
     ],
+    "chat.tools.terminal.autoApprove": {
+        "/^cargo build --release --bin self-writer --features \"xtal-12mhz\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    },
 }

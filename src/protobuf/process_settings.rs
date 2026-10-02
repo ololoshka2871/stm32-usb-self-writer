@@ -6,6 +6,7 @@ use alloc::{
 use my_proc_macro::store_coeff;
 
 use crate::{
+    clocking::rtc::CurrentTime,
     config,
     protobuf::PASSWORD_SIZE,
     settings::{self, SettingActionError},
@@ -375,6 +376,7 @@ pub fn update_settings(
 pub fn fill_rtc_control(
     rtc_resp: &mut messages::RtcControlResponse,
     current_trimming_ppm: f32,
+    current_time: CurrentTime,
     with_settings: &mut impl FnMut(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
@@ -383,9 +385,53 @@ pub fn fill_rtc_control(
         rtc_resp.current_mode = ws.rtc_trimming_mode as i32;
         rtc_resp.trimming_coefficients = ws.rtc_trimming_coeffs.into();
         rtc_resp.current_trimming_ppm = current_trimming_ppm;
+        rtc_resp.current_time = current_time.into();
 
         (false, false)
     });
+}
+
+pub fn parse_rtc_time(time: &messages::RtcTime) -> Result<CurrentTime, SettingActionError<String>> {
+    let current_time = CurrentTime {
+        year: time.year,
+        month: time.month,
+        day_of_month: time.day_of_month,
+        day_of_week: time.day_of_week,
+        hours: time.hours,
+        minutes: time.minutes,
+        seconds: time.seconds,
+        milliseconds: time.milliseconds,
+    };
+
+    if current_time.month < 1 || current_time.month > 12 {
+        return Err(SettingActionError::new("RTC Month must be in 1..=12".to_string()));
+    }
+    if current_time.day_of_month < 1 || current_time.day_of_month > 31 {
+        return Err(SettingActionError::new(
+            "RTC DayOfMonth must be in 1..=31".to_string(),
+        ));
+    }
+    if current_time.day_of_week < 1 || current_time.day_of_week > 7 {
+        return Err(SettingActionError::new(
+            "RTC DayOfWeek must be in 1..=7".to_string(),
+        ));
+    }
+    if current_time.hours > 23 {
+        return Err(SettingActionError::new("RTC Hours must be in 0..=23".to_string()));
+    }
+    if current_time.minutes > 59 {
+        return Err(SettingActionError::new("RTC Minutes must be in 0..=59".to_string()));
+    }
+    if current_time.seconds > 59 {
+        return Err(SettingActionError::new("RTC Seconds must be in 0..=59".to_string()));
+    }
+    if current_time.milliseconds > 999 {
+        return Err(SettingActionError::new(
+            "RTC Milliseconds must be in 0..=999".to_string(),
+        ));
+    }
+
+    Ok(current_time)
 }
 
 pub fn update_rtc_control(

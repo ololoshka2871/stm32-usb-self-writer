@@ -1,4 +1,5 @@
 use crate::{
+    clocking::rtc::CurrentTime,
     main_data_storage::StorageMetaHandle,
     settings,
     workmodes::output_storage::OutputStorage,
@@ -11,6 +12,7 @@ pub fn process_request(
     resp: &mut super::messages::Response,
     output_getter: &mut impl FnMut() -> OutputStorage,
     rtc_trimming_getter: &mut impl FnMut() -> f32,
+    rtc_time_exchange: &mut impl FnMut(Option<CurrentTime>) -> CurrentTime,
     with_settings: &mut impl FnMut(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
@@ -75,6 +77,18 @@ pub fn process_request(
     }
 
     if let Some(rtc_control) = &req.rtc_control {
+        if let Some(set_time) = &rtc_control.set_time {
+            match super::process_settings::parse_rtc_time(set_time) {
+                Ok(t) => {
+                    rtc_time_exchange(Some(t));
+                }
+                Err(e) => {
+                    defmt::error!("RTC set time error: {}", e);
+                    resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
+                }
+            }
+        }
+
         match super::process_settings::update_rtc_control(rtc_control, with_settings) {
             Ok(need_to_write) => need_to_write_settings |= need_to_write,
             Err(e) => {
@@ -87,6 +101,7 @@ pub fn process_request(
         super::process_settings::fill_rtc_control(
             &mut rtc_control_response,
             rtc_trimming_getter(),
+            rtc_time_exchange(None),
             with_settings,
         );
         resp.rtc_control = Some(rtc_control_response);

@@ -968,17 +968,26 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage, settings, rtc_last_trimming_ppm], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 2)]
+    #[task(shared = [output_storage, settings, rtc_last_trimming_ppm, rtc], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 2)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
         let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
         let mut rtc_last_trimming_ppm = ctx.shared.rtc_last_trimming_ppm;
+        let mut rtc = ctx.shared.rtc;
         let protobuf_output_tx = ctx.local.protobuf_output_tx;
         let storage_meta = *ctx.local.storage_meta;
 
         let mut get_output = move || output_storage.lock(|storage| storage.clone());
         let mut get_rtc_trimming = move || rtc_last_trimming_ppm.lock(|v| *v);
+        let mut rtc_time_exchange = move |set_time: Option<stm32_usb_self_writer::clocking::rtc::CurrentTime>| {
+            rtc.lock(move |rtc| {
+                if let Some(t) = set_time {
+                    rtc.set_time(t);
+                }
+                rtc.current_time()
+            })
+        };
         let mut with_settings = move |f: &mut dyn FnMut(
             &mut (settings::AppSettings, settings::NonStoreSettings),
         ) -> (bool, bool)| {
@@ -1008,6 +1017,7 @@ mod app {
                 || Mono::now().ticks(),
                 &mut get_output,
                 &mut get_rtc_trimming,
+                &mut rtc_time_exchange,
                 &mut with_settings,
                 storage_meta,
             )

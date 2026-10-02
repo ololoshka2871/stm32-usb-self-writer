@@ -156,3 +156,18 @@ impl From<crate::settings::RtcTrimmingCoeffs> for RtcTrimmingCoefficients {
         }
     }
 }
+
+impl From<crate::clocking::rtc::CurrentTime> for RtcTime {
+    fn from(t: crate::clocking::rtc::CurrentTime) -> Self {
+        Self {
+            year: t.year,
+            month: t.month,
+            day_of_month: t.day_of_month,
+            day_of_week: t.day_of_week,
+            hours: t.hours,
+            minutes: t.minutes,
+            seconds: t.seconds,
+            milliseconds: t.milliseconds,
+        }
+    }
+}
