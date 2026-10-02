@@ -581,15 +581,6 @@ dependencies = [
 [[package]]
 name = "heatshrink-rust"
 version = "0.7.0"
-source = "git+https://github.com/ololoshka2871/heatshrink.rs.git?rev=0af9332#0af93325d835dcb98a700a420cbf122c6c3ddd75"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
-name = "heatshrink-rust"
-version = "0.7.0"
 source = "git+https://gitea.sctbelpa/Public/heatshrink.rs.git?rev=1d69460d41#1d69460d419f5e83c5ea80c4039713ef7aab2e75"
 dependencies = [
  "cc",
@@ -600,7 +591,7 @@ name = "heatshrink-rust-macro"
 version = "0.3.1"
 source = "git+https://gitea.sctbelpa/Public/heatshrink.rs.git?rev=1d69460d41#1d69460d419f5e83c5ea80c4039713ef7aab2e75"
 dependencies = [
- "heatshrink-rust 0.7.0 (git+https://gitea.sctbelpa/Public/heatshrink.rs.git?rev=1d69460d41)",
+ "heatshrink-rust",
  "quote",
  "syn 1.0.109",
 ]
@@ -1294,10 +1285,10 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "self-recorder-packet"
-version = "0.5.0"
-source = "git+https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git?rev=8408b66a792611e8c96b0a5156d444ce0e6e7fb4#8408b66a792611e8c96b0a5156d444ce0e6e7fb4"
+version = "0.4.0"
+source = "git+https://gitea.sctbelpa/SCTBElpa/self-recorder-packet.git?rev=d35dd90ac2#d35dd90ac2e51347bc2f1301c790f777ee07508e"
 dependencies = [
- "heatshrink-rust 0.7.0 (git+https://github.com/ololoshka2871/heatshrink.rs.git?rev=0af9332)",
+ "heatshrink-rust",
 ]
 
 [[package]]
@@ -1421,7 +1412,7 @@ dependencies = [
  "emfat-rust",
  "flash-settings-rs",
  "futures",
- "heatshrink-rust 0.7.0 (git+https://gitea.sctbelpa/Public/heatshrink.rs.git?rev=1d69460d41)",
+ "heatshrink-rust",
  "heatshrink-rust-macro",
  "lazy_static",
  "my-proc-macro",
