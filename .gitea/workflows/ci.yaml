@@ -5,10 +5,6 @@ on:
     tags:
       - v*
 
-# Caching proxy
-env:
-  NODE_TLS_REJECT_UNAUTHORIZED: 0
-
 jobs:
   build:
     runs-on: rust-stm32-r194
@@ -30,11 +26,20 @@ jobs:
           echo '${{ vars.CARGO_MIRROR_DEFINE }}' >> .cargo/config.toml
           cat .cargo/config.toml
 
-      - name: Build
-        run: cargo build --release --bin self-writer
+      - name: Build 24MHz xtal version
+        run: |
+          cargo build --release --features "xtal-24mhz" --bin self-writer
+          arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer self-writer-24mhz.bin
 
-      - name: Create binary dist
-        run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer self-writer.bin
+      - name: Build 12MHz xtal version
+        run: |
+          cargo build --release --features "xtal-12mhz" --bin self-writer
+          arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer self-writer-12mhz.bin
+
+      - name: Build no-flash version
+        run: |
+          cargo build --release --features "xtal-24mhz,no-flash" --bin self-writer
+          arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/self-writer self-writer-24mhz-no-flash.bin
 
       - name: Read version from Cargo.toml
         uses: https://gitea.sctbelpa/Public/toml-action@v1.2.0
@@ -45,10 +50,14 @@ jobs:
 
       - name: Create release
         uses: https://gitea.sctbelpa/Public/gitea-release-action@v1
+        env:
+          NODE_USE_SYSTEM_CA: 1
         with:
           name: v${{ steps.read_version.outputs.value }}
           body: |
             This is an automatic ${{ steps.read_version.outputs.value }} release!
           prerelease: true
           files: |
-            self-writer.bin
+            self-writer-24mhz.bin
+            self-writer-12mhz.bin
+            self-writer-24mhz-no-flash.bin
