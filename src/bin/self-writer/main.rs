@@ -1351,6 +1351,10 @@ mod app {
                 if let Err(err) = rtc.lock(|rtc| rtc.set_calibration(trimming_ppm)) {
                     defmt::error!("Failed to set RTC calibration: {:?}", err);
                 }
+            } else {
+                defmt::trace!("RTC trimming is disabled, setting to 0 ppm");
+                rtc_last_trimming_ppm.lock(|v| *v = 0.0);
+                let _ = rtc.lock(|rtc| rtc.set_calibration(0.0));
             }
         }
     }

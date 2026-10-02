@@ -196,7 +196,7 @@ impl RtcTrimming for RtcService {
     fn set_calibration(&mut self, calibration_ppm: f32) -> Result<(), RtcTrimmingError> {
         let magnitude = (calibration_ppm + self.last_calibration_error_ppm) / TRIMMING_ACCURACY_PPM;
         let magnitude_clamped = magnitude.clamp(-511.0, 512.0).round();
-        self.last_calibration_error_ppm = magnitude - magnitude_clamped;
+        self.last_calibration_error_ppm = (magnitude - magnitude_clamped) * TRIMMING_ACCURACY_PPM;
         let (calp, calm) = if magnitude_clamped >= 0.0 {
             (false, magnitude_clamped as u16)
         } else {
