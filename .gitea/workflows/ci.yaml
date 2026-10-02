@@ -51,7 +51,7 @@ jobs:
       - name: Create release
         uses: https://gitea.sctbelpa/Public/gitea-release-action@v1
         env:
-          NODE_USE_SYSTEM_CA: 1
+          NODE_TLS_REJECT_UNAUTHORIZED: 0
         with:
           name: v${{ steps.read_version.outputs.value }}
           body: |
