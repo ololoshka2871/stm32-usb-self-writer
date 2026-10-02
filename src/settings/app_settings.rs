@@ -99,6 +99,45 @@ pub struct WriteConfig {
     pub t_write_devider: u32,
 }
 
+#[derive(Debug, Copy, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RtcTrimmingCoeffs {
+    pub t0: f32,
+    pub t1: f32,
+    pub t2: f32,
+}
+
+impl RtcTrimmingCoeffs {
+    pub fn calculate_trimming(&self, t: f32) -> f32 {
+        self.t0 + t * (self.t1 + t * self.t2)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, FromPrimitive)]
+#[serde(rename_all = "PascalCase")]
+pub enum RtcTrimmingMode {
+    Off = 0,
+    Normal = 1,
+    Calibrating = 2,
+    Verify = 3,
+}
+
+impl RtcTrimmingMode {
+    pub fn is_output_enabled(&self) -> bool {
+        match self {
+            RtcTrimmingMode::Calibrating | RtcTrimmingMode::Verify => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_trimming(&self) -> bool {
+        match self {
+            RtcTrimmingMode::Normal | RtcTrimmingMode::Verify => true,
+            _ => false,
+        }
+    }
+}
+
 #[repr(packed(1))]
 #[derive(Debug, Copy, Clone, Serialize, Default, PartialEq, defmt::Format)]
 #[serde(rename_all = "PascalCase")]
@@ -200,6 +239,9 @@ pub struct AppSettings {
     pub start_delay: u32,
 
     pub pressure_meassure_units: PressureMeassureUnits,
+
+    pub rtc_trimming_mode: RtcTrimmingMode,
+    pub rtc_trimming_coeffs: RtcTrimmingCoeffs,
 
     #[serde(skip_serializing)]
     pub password: [u8; crate::protobuf::PASSWORD_SIZE],

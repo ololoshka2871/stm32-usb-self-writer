@@ -1,7 +1,7 @@
 mod callbacks;
 mod static_data;
 
-use core::{cell::RefCell, usize};
+use core::cell::RefCell;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 

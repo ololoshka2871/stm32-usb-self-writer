@@ -89,3 +89,6 @@ pub const EXT_RTC_SYNC_PERIOD_S: u32 = 30;
 
 // Частота генерируемая часами для калибровки RTC
 pub const EXT_RTC_CALIBRATION_FREQ_HZ: u32 = 512;
+
+// Период обновления тримминга RTC в секундах
+pub const RTC_TRIMM_PERIOD_S: u32 = 5;

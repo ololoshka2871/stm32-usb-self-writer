@@ -10,6 +10,7 @@ pub fn process_request(
     req: &super::messages::Request,
     resp: &mut super::messages::Response,
     output_getter: &mut impl FnMut() -> OutputStorage,
+    rtc_trimming_getter: &mut impl FnMut() -> f32,
     with_settings: &mut impl FnMut(
         &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
     ) -> bool,
@@ -71,6 +72,24 @@ pub fn process_request(
 
         resp.change_password_status =
             Some(super::messages::ChangePasswordStatus { password_changed });
+    }
+
+    if let Some(rtc_control) = &req.rtc_control {
+        match super::process_settings::update_rtc_control(rtc_control, with_settings) {
+            Ok(need_to_write) => need_to_write_settings |= need_to_write,
+            Err(e) => {
+                defmt::error!("RTC control update error: {}", e);
+                resp.global_status = super::messages::Status::ErrorsInSubcommands as i32;
+            }
+        }
+
+        let mut rtc_control_response = super::messages::RtcControlResponse::default();
+        super::process_settings::fill_rtc_control(
+            &mut rtc_control_response,
+            rtc_trimming_getter(),
+            with_settings,
+        );
+        resp.rtc_control = Some(rtc_control_response);
     }
 
     if let Some(flash_command) = req.flash_command {

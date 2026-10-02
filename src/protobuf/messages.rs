@@ -146,3 +146,13 @@ impl From<&crate::settings::WriteConfig> for WriteConfig {
         }
     }
 }
+
+impl From<crate::settings::RtcTrimmingCoeffs> for RtcTrimmingCoefficients {
+    fn from(tc: crate::settings::RtcTrimmingCoeffs) -> Self {
+        Self {
+            t0: tc.t0,
+            t1: tc.t1,
+            t2: tc.t2,
+        }
+    }
+}

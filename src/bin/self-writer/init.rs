@@ -355,7 +355,5 @@ where
 pub fn try_init_external_rtc<I2C: i2c::Write + i2c::Read + i2c::WriteRead + 'static>(
     i2c: I2C,
 ) -> Result<stm32_usb_self_writer::clocking::rtc::ext_rtc::ExtRtcType<I2C>, I2C> {
-    let rtc = stm32_usb_self_writer::clocking::rtc::ext_rtc::try_detect_i2c_rtc(i2c)?;
-
-    Ok(rtc)
+    stm32_usb_self_writer::clocking::rtc::ext_rtc::try_detect_i2c_rtc(i2c)
 }

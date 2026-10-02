@@ -1,5 +1,3 @@
-use core::usize;
-
 use alloc::{
     format,
     string::{String, ToString},
@@ -363,4 +361,46 @@ pub fn update_settings(
     } else {
         Ok(res)
     }
+}
+
+pub fn fill_rtc_control(
+    rtc_resp: &mut messages::RtcControlResponse,
+    current_trimming_ppm: f32,
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) {
+    with_settings(&mut |(ws, _)| {
+        rtc_resp.current_mode = ws.rtc_trimming_mode as i32;
+        rtc_resp.trimming_coefficients = ws.rtc_trimming_coeffs.into();
+        rtc_resp.current_trimming_ppm = current_trimming_ppm;
+
+        (false, false)
+    });
+}
+
+pub fn update_rtc_control(
+    req: &super::messages::RtcControlReq,
+    with_settings: &mut impl FnMut(
+        &mut dyn FnMut(&mut (settings::AppSettings, settings::NonStoreSettings)) -> (bool, bool),
+    ) -> bool,
+) -> Result<bool, SettingActionError<String>> {
+    Ok(with_settings(&mut |(ws, _)| {
+        let mut need_write = false;
+
+        if let Some(mode) = &req.mode {
+            ws.rtc_trimming_mode =
+                num::FromPrimitive::from_i32(*mode).unwrap_or(settings::RtcTrimmingMode::Off);
+            need_write = true;
+        }
+
+        if let Some(coeffs) = &req.trimming_coefficients {
+            ws.rtc_trimming_coeffs.t0 = coeffs.t0;
+            ws.rtc_trimming_coeffs.t1 = coeffs.t1;
+            ws.rtc_trimming_coeffs.t2 = coeffs.t2;
+            need_write = true;
+        }
+
+        (need_write, need_write)
+    }))
 }

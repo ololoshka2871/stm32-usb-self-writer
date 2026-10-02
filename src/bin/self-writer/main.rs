@@ -30,7 +30,7 @@ use rtic_sync::channel::{Receiver, Sender};
 
 use stm32_usb_self_writer::{
     InputChannel, RtcSync,
-    clocking::rtc::{I2CRtcCtrl, ext_rtc::ExtRtcType, int_rtc::RtcService},
+    clocking::rtc::{I2CRtcCtrl, RtcTrimming, ext_rtc::ExtRtcType, int_rtc::RtcService},
     config, is_usb_connected,
     sensors::freqmeter::{Capture, Capturer, ExtInputType, TimerInpitCounterExt},
     settings,
@@ -70,6 +70,7 @@ mod app {
     struct Shared {
         led: Option<types::Led>,
         rtc: RtcService,
+        rtc_last_trimming_ppm: f32,
         base_period: config::Duration,
         f1_base_period_devider: u32,
         f2_base_period_devider: u32,
@@ -182,7 +183,7 @@ mod app {
             cortex_m::singleton!(: STM32L4Crc32 = crc).unwrap()
         };
 
-        let (settings, flash_policy, base_period, start_delay, write_config) =
+        let (mut settings, flash_policy, base_period, start_delay, write_config) =
             init_settings(flash, unsafe { crc.make_handler() }, high_perf_mode);
 
         let mut rtc = init_rtc_service(
@@ -397,9 +398,10 @@ mod app {
                     let _ = sda.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
                     let _ = scl.into_floating_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
-                    let led = if fast_mode
-                    /* && TODO: if enabled in settings */
-                    {
+                    let rtc_calibration_output_enabled =
+                        settings.ref_mut().0.rtc_trimming_mode.is_output_enabled();
+
+                    let led = if fast_mode && rtc_calibration_output_enabled {
                         use stm32_usb_self_writer::clocking::rtc::RtcCalibrationOutput;
 
                         rtc.enable_calibration_output(
@@ -504,9 +506,12 @@ mod app {
             protobuf_server::spawn().expect("Failed to spawn protobuf_server task");
             read_analog::spawn().expect("Failed to spawn read_analog task");
 
+            rtc_trimm::spawn().expect("Failed to spawn rtc_trimm task");
+
             config::Duration::secs(0)
         } else {
             self_writer_signal::spawn().expect("Failed to spawn self_writer_signal task");
+            rtc_trimm::spawn().expect("Failed to spawn rtc_trimm task");
 
             let blink_delay =
                 config::Duration::millis(config::START_BLINK_PERIOD_MS) * config::START_BLINK_COUNT;
@@ -527,6 +532,7 @@ mod app {
                 led,
 
                 rtc,
+                rtc_last_trimming_ppm: 0.0,
                 base_period,
                 f1_base_period_devider: write_config.p_write_devider,
                 f2_base_period_devider: write_config.t_write_devider,
@@ -634,7 +640,11 @@ mod app {
     }
 
     // Приоритет строго равен sync_freqmeter*, иначе Deadlock на мьютексе rtc_sync
-    #[task(binds = RTC_WKUP, shared = [rtc, &rtc_sync], priority = 4)]
+    #[task(
+        binds = RTC_WKUP,
+        shared = [rtc, &rtc_sync],
+        priority = 4
+    )]
     fn rtc_alarm(ctx: rtc_alarm::Context) {
         let mut rtc = ctx.shared.rtc;
         let rtc_sync = ctx.shared.rtc_sync;
@@ -958,15 +968,17 @@ mod app {
         }
     }
 
-    #[task(shared = [output_storage, settings], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 2)]
+    #[task(shared = [output_storage, settings, rtc_last_trimming_ppm], local = [protobuf_input_rx, protobuf_output_tx, storage_meta], priority = 2)]
     async fn protobuf_server(ctx: protobuf_server::Context) {
         let mut rx_stream = impls::AsyncProtobufStream::new(ctx.local.protobuf_input_rx);
         let mut output_storage = ctx.shared.output_storage;
         let mut settings = ctx.shared.settings;
+        let mut rtc_last_trimming_ppm = ctx.shared.rtc_last_trimming_ppm;
         let protobuf_output_tx = ctx.local.protobuf_output_tx;
         let storage_meta = *ctx.local.storage_meta;
 
         let mut get_output = move || output_storage.lock(|storage| storage.clone());
+        let mut get_rtc_trimming = move || rtc_last_trimming_ppm.lock(|v| *v);
         let mut with_settings = move |f: &mut dyn FnMut(
             &mut (settings::AppSettings, settings::NonStoreSettings),
         ) -> (bool, bool)| {
@@ -995,6 +1007,7 @@ mod app {
                 protobuf_output_tx,
                 || Mono::now().ticks(),
                 &mut get_output,
+                &mut get_rtc_trimming,
                 &mut with_settings,
                 storage_meta,
             )
@@ -1308,6 +1321,37 @@ mod app {
             Ok(true) => defmt::info!("Storage erase completed"),
             Ok(false) => (),
             Err(e) => defmt::error!("Storage erase failed: {}", defmt::Debug2Format(&e)),
+        }
+    }
+
+    #[task(shared = [rtc_last_trimming_ppm, output_storage, settings, rtc], priority = 1)]
+    async fn rtc_trimm(ctx: rtc_trimm::Context) {
+        let mut rtc_last_trimming_ppm = ctx.shared.rtc_last_trimming_ppm;
+        let mut output_storage = ctx.shared.output_storage;
+        let mut settings = ctx.shared.settings;
+        let mut rtc = ctx.shared.rtc;
+
+        loop {
+            Mono::delay(config::Duration::secs(config::RTC_TRIMM_PERIOD_S)).await;
+
+            let (coeffs, trimming_enabled) = settings.lock(|settings| {
+                let coeffs = settings.ref_mut().0.rtc_trimming_coeffs;
+                let trimming_enabled = settings.ref_mut().0.rtc_trimming_mode.is_trimming();
+                (coeffs, trimming_enabled)
+            });
+
+            if trimming_enabled {
+                let tcpu = output_storage.lock(|output| output.t_cpu);
+
+                // Calculate the RTC trimming value based on the temperature coefficients and the current CPU temperature
+                let trimming_ppm = coeffs.calculate_trimming(tcpu);
+
+                rtc_last_trimming_ppm.lock(|v| *v = trimming_ppm);
+
+                if let Err(err) = rtc.lock(|rtc| rtc.set_calibration(trimming_ppm)) {
+                    defmt::error!("Failed to set RTC calibration: {:?}", err);
+                }
+            }
         }
     }
 

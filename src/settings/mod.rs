@@ -73,6 +73,13 @@ static DEFAULT_SETTINGS: AppSettings = AppSettings {
 
     pressure_meassure_units: app_settings::PressureMeassureUnits::Bar,
 
+    rtc_trimming_mode: app_settings::RtcTrimmingMode::Off,
+    rtc_trimming_coeffs: app_settings::RtcTrimmingCoeffs {
+        t0: 0.0,
+        t1: 0.0,
+        t2: 0.0,
+    },
+
     password: *b"_PASSWORD_",
 
     monitoring: app_settings::Monitoring {
