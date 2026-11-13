@@ -44,4 +44,5 @@ target = "thumbv7em-none-eabihf"     # Cortex-M4F and Cortex-M7F (with FPU)
 # target = "thumbv8m.main-none-eabihf" # Cortex-M33 (with FPU)
 
 [env]
-DEFMT_LOG = "debug"
+# Set the default log level for defmt (override the log level by DEFMT_LOG=... cargo run --release ...)
+DEFMT_LOG = "info"

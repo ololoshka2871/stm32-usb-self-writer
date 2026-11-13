@@ -16,7 +16,7 @@
         "--all-targets",
         "--keep-going",
         "--release",
-        "--features=\"xtal-24mhz,maket\""
+        "--features=xtal-12mhz"
     ],
     "chat.tools.terminal.autoApprove": {
         "/^cargo build --release --bin self-writer --features \"xtal-12mhz\"$/": {
