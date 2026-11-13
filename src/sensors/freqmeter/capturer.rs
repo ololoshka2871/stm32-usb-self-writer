@@ -45,25 +45,18 @@ impl<TIM: TimerInputConfig + TimerControl, PIN, const IN_TYPE: u8> Capturer<TIM,
         self.input.disable();
     }
 
-    pub fn capture_master(&self, dma_value: u16) -> Capture {
-        let (extender_value, counter_value) = cortex_m::interrupt::free(|_| unsafe {
-            (
-                self.master_extender.read_volatile() as u32,
-                (self.master_cnt_reg_addr as *const u16).read_volatile(),
-            )
+    pub fn capture_master_at_dma(&self, dma_value: u16) -> Capture {
+        // Читаем extender и counter синхронно в критической секции
+        // без попыток детектирования переполнений -просто используем 
+        // текущее состояние extender
+        
+        let extender = cortex_m::interrupt::free(|_| unsafe {
+            self.master_extender.read_volatile() as u16
         });
-
-        // Если захвачено достаточно больше чет текущее, то это значит что произошло переполнение пока суть до дело..
-        // вычтем 1 из расширителя чтобы учесть это переполнение
-        let extender_value = if counter_value < dma_value {
-            extender_value.wrapping_sub(1)
-        } else {
-            extender_value
-        };
 
         Capture {
             target: self.current_target,
-            dma_value: (extender_value << 16) | dma_value as u32,
+            dma_value: ((extender as u32) << 16) | (dma_value as u32),
         }
     }
 }

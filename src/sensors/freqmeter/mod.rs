@@ -11,7 +11,7 @@ pub mod tim_input_config_helper;
 
 pub use capture::Capture;
 pub use capturer::Capturer;
-pub use freqmeter::{calc_new_target, calc_result};
+pub use freqmeter::{calc_new_target, calc_result, try_correct_overflow};
 pub use freqmeter_dma_l4::FreqmeterDmaChannelExt;
 pub use input_counter::{ExtInputType, InputCounter, TimerInpitCounterExt};
 pub use master_counter::*;
@@ -29,7 +29,9 @@ macro_rules! freqmeter_dma_interrupt {
         use stm32_usb_self_writer::sensors::freqmeter::FreqmeterDmaChannelExt;
 
         let buffer = $buffer;
-        let capture: Capture = $capturer.lock(move |capturer| capturer.capture_master(buffer));
+        let capture: Capture = $capturer.lock(|capturer| {
+            capturer.capture_master_at_dma(buffer)
+        });
 
         let _ = $capture_tx.try_send(capture);
 
@@ -90,7 +92,7 @@ macro_rules! freqmeter {
         mono=$mono:ty,
     ) => {
         use stm32_usb_self_writer::sensors::freqmeter::{
-            FreqmeterDmaChannelExt, FreqmeterStates, calc_new_target, calc_result,
+            FreqmeterDmaChannelExt, FreqmeterStates, calc_new_target, calc_result, try_correct_overflow,
         };
 
         let f_ref = $f_ref;
@@ -190,7 +192,7 @@ macro_rules! freqmeter {
                                 defmt::debug!(
                                     "{}: Adaptation done, Freq: {} Hz, remaining: {} ms",
                                     $channel,
-                                    f,
+                                    f as i32,
                                     rtc_sync.until_deadline_millis(deadline)
                                 );
                                 (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
@@ -331,7 +333,31 @@ macro_rules! freqmeter {
                         Ok(Ok(capture)) => {
                             defmt::trace!("{}: Measure: Got second capture: {}", $channel, capture);
                             if let Ok((f, result)) = calc_result(start_capture, capture, f_ref) {
-                                defmt::trace!("{}: Measurment done: Freq: {} Hz", $channel, f);
+                                // Check for frequency anomaly: sudden jump > 5% from previous
+                                let freq_change_pct = (f - prev_freq).abs() / prev_freq * 100.0;
+                                
+                                let (f_final, result_final) = if freq_change_pct > 5.0 {
+                                    // Anomaly detected, try to correct it
+                                    let (f_corrected, result_corrected, corrected) = 
+                                        try_correct_overflow(result, target, f_ref, prev_freq);
+                                    if corrected {
+                                        defmt::debug!(
+                                            "{}: Anomaly corrected: {} Hz -> {} Hz, result: {} -> {}",
+                                            $channel,
+                                            f as i32,
+                                            f_corrected as i32,
+                                            result,
+                                            result_corrected
+                                        );
+                                        (f_corrected, result_corrected)
+                                    } else {
+                                        (f, result)
+                                    }
+                                } else {
+                                    (f, result)
+                                };
+                                
+                                defmt::trace!("{}: Measurment done: Freq: {} Hz", $channel, f_final);
                                 (&mut transfer_fin, &mut f_capturer).lock(|transfer, capturer| {
                                     transfer.stop();
                                     capturer.stop();
@@ -342,8 +368,8 @@ macro_rules! freqmeter {
                                     output_storage.set_freqmeter_result(
                                         $channel as usize,
                                         target as u32,
-                                        Some(result),
-                                        Some(f as f64),
+                                        Some(result_final),
+                                        Some(f_final as f64),
                                         rtc.lock(|rtc| rtc.current_time()),
                                     )
                                 });
@@ -352,7 +378,7 @@ macro_rules! freqmeter {
                                     deadline,
                                     $base_period,
                                     $base_period_devider,
-                                    Some(f),
+                                    Some(f_final),
                                 );
 
                                 rtc_sync.delay_until_sync(deadline).await;
