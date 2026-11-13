@@ -22,6 +22,7 @@
         "/^cargo build --release --bin self-writer --features \"xtal-12mhz\"$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "cargo build": true
     },
 }

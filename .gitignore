@@ -26,3 +26,6 @@ __pycache__/
 # pdf
 *.pdf
 !doc/*.pdf
+
+# AI
+.agents/
